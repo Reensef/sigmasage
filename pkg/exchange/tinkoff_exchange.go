@@ -3,10 +3,11 @@ package exchange
 import "log"
 
 type TinkoffExchange struct {
+	tocken string
 }
 
-func New() *TinkoffExchange {
-	return &TinkoffExchange{}
+func New(tocken string) *TinkoffExchange {
+	return &TinkoffExchange{tocken: tocken}
 }
 
 func (e *TinkoffExchange) Buy() {
