@@ -2,6 +2,7 @@ package marketdata
 
 import (
 	"context"
+	"fmt"
 	"os/signal"
 	"sync"
 	"syscall"
@@ -14,10 +15,12 @@ import (
 
 // TinkoffMarketdata implements an observer that distributes candle data to subscribers
 type TinkoffMarketdata struct {
-	token             string
-	candleSubscribers map[SubscribeInfo][]chan Candle // map of instrumentID to channel of candles
-	mu                sync.RWMutex
-	mdStreamClient    *investgo.MarketDataStreamClient
+	token               string
+	mu                  sync.RWMutex
+	mdStream            *investgo.MarketDataStream
+	candleSubscribers   map[SubscribeInfo][]chan Candle
+	candlesChanCancel   context.CancelFunc
+	areCandlesStreaming bool
 }
 
 func New(token string) *TinkoffMarketdata {
@@ -27,7 +30,7 @@ func New(token string) *TinkoffMarketdata {
 
 	config := investgo.Config{
 		EndPoint:        "invest-public-api.tinkoff.ru:443",
-		Token:           token,
+		Token:           "t.b8rY7Kv7HppxKdwCynTNbZbJ6kCzR09EbEQf5gAsJhGIOVU1oteZAit8eRdInD1pFxC8h8PvnAtumjuvcDn3pg",
 		MaxRetries:      3,
 		AppName:         "sigmasage",
 		DisableAllRetry: false,
@@ -39,11 +42,15 @@ func New(token string) *TinkoffMarketdata {
 	}
 
 	mdStreamClient := client.NewMarketDataStreamClient()
+	mdStream, err := mdStreamClient.MarketDataStream()
+	if err != nil {
+		panic(err)
+	}
 
 	return &TinkoffMarketdata{
 		token:             token,
 		candleSubscribers: make(map[SubscribeInfo][]chan Candle),
-		mdStreamClient:    mdStreamClient,
+		mdStream:          mdStream,
 	}
 }
 
@@ -59,9 +66,7 @@ func (t *TinkoffMarketdata) SubscribeCandles(subscribeInfo SubscribeInfo) (<-cha
 	}
 	t.candleSubscribers[subscribeInfo] = append(t.candleSubscribers[subscribeInfo], ch)
 
-	if len(t.candleSubscribers[subscribeInfo]) == 1 {
-		go t.streamCandles(subscribeInfo)
-	}
+	t.startStreamCandles(subscribeInfo)
 
 	return ch, nil
 }
@@ -87,81 +92,76 @@ func (t *TinkoffMarketdata) UnsubscribeCandles(subscribeInfo SubscribeInfo, ch <
 }
 
 // streamCandles starts a gRPC stream for the specified instrument and interval
-func (t *TinkoffMarketdata) streamCandles(subscribeInfo SubscribeInfo) {
-	ctx := context.Background()
-
+func (t *TinkoffMarketdata) startStreamCandles(subscribeInfo SubscribeInfo) {
 	tinkoffInterval := t.convertToTinkoffCandleInterval(subscribeInfo.interval)
 
-	// Create subscription request
-	req := &investgo.CandleInstrument{
-		Figi:     instrumentID,
-		Interval: tinkoffInterval,
-	}
-
 	// Start streaming
-	stream, err := t.marketDataClient.GetCandles(ctx, req)
+	candlesChan, err := t.mdStream.SubscribeCandle(
+		[]string{subscribeInfo.intrumentID},
+		tinkoffInterval,
+		true,
+		nil,
+	)
 	if err != nil {
 		// TODO: Handle error properly
 		return
 	}
 
-	for {
-		candle, err := stream.Recv()
-		if err != nil {
-			// TODO: Handle error properly
-			return
-		}
+	if t.areCandlesStreaming {
+		return
+	}
 
-		// Convert Tinkoff candle to our Candle type
-		ourCandle := Candle{
-			InstrumentID: instrumentID,
-			Interval:     interval,
-			High:         candle.GetHigh().ToFloat64(),
-			Low:          candle.GetLow().ToFloat64(),
-		}
+	t.areCandlesStreaming = true
 
-		// Send to all subscribers
-		t.mu.RLock()
-		for _, ch := range t.candleSubscribers[subscribeInfo] {
+	var ctx context.Context
+	ctx, t.candlesChanCancel = signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
+
+	go func(ctx context.Context) {
+		for {
 			select {
-			case ch <- ourCandle:
-			default:
-				// Skip if channel is full
+			case <-ctx.Done():
+				return
+			case candle, ok := <-candlesChan:
+				if !ok {
+					return
+				}
+				fmt.Println("Candle high price = ", candle.GetHigh().ToFloat())
 			}
 		}
-		t.mu.RUnlock()
-	}
+	}(ctx)
 }
 
-func (t *TinkoffMarketdata) convertToTinkoffCandleInterval(interval SubscriptionInterval) pb.CandleInterval {
+func (t *TinkoffMarketdata) convertToTinkoffCandleInterval(interval SubscriptionInterval) pb.SubscriptionInterval {
 	switch interval {
 	case UNSPECIFIED:
-		return pb.CandleInterval_CANDLE_INTERVAL_UNSPECIFIED
+		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_UNSPECIFIED
 	case ONE_MINUTE:
-		return pb.CandleInterval_CANDLE_INTERVAL_1_MIN
+		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_ONE_MINUTE
 	case TWO_MIN:
-		return pb.CandleInterval_CANDLE_INTERVAL_2_MIN
+		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_2_MIN
 	case THREE_MIN:
-		return pb.CandleInterval_CANDLE_INTERVAL_3_MIN
+		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_3_MIN
 	case FIVE_MINUTES:
-		return pb.CandleInterval_CANDLE_INTERVAL_5_MIN
+		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_FIVE_MINUTES
+	case TEN_MIN:
+		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_10_MIN
 	case FIFTEEN_MINUTES:
-		return pb.CandleInterval_CANDLE_INTERVAL_15_MIN
+		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_FIFTEEN_MINUTES
 	case THERTY_MIN:
-		return pb.CandleInterval_CANDLE_INTERVAL_30_MIN
+		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_30_MIN
 	case ONE_HOUR:
-		return pb.CandleInterval_CANDLE_INTERVAL_HOUR
+		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_ONE_HOUR
 	case TWO_HOUR:
-		return pb.CandleInterval_CANDLE_INTERVAL_2_HOUR
+		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_2_HOUR
 	case FOUR_HOUR:
-		return pb.CandleInterval_CANDLE_INTERVAL_4_HOUR
+		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_4_HOUR
 	case ONE_DAY:
-		return pb.CandleInterval_CANDLE_INTERVAL_DAY
+		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_ONE_DAY
 	case WEEK:
-		return pb.CandleInterval_CANDLE_INTERVAL_WEEK
+		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_WEEK
 	case MONTH:
-		return pb.CandleInterval_CANDLE_INTERVAL_MONTH
+		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_MONTH
 	default:
-		return pb.CandleInterval_CANDLE_INTERVAL_UNSPECIFIED
+		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_UNSPECIFIED
 	}
 }

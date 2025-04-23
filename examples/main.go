@@ -1,4 +1,4 @@
-package examples
+package main
 
 import (
 	"context"
@@ -19,7 +19,7 @@ func main() {
 
 	config := investgo.Config{
 		EndPoint:        "invest-public-api.tinkoff.ru:443",
-		Token:           token,
+		Token:           "t.b8rY7Kv7HppxKdwCynTNbZbJ6kCzR09EbEQf5gAsJhGIOVU1oteZAit8eRdInD1pFxC8h8PvnAtumjuvcDn3pg",
 		MaxRetries:      3,
 		AppName:         "sigmasage",
 		DisableAllRetry: false,
@@ -42,7 +42,7 @@ func main() {
 	}
 	// результат подписки на инструменты это канал с определенным типом информации, при повторном вызове функции
 	// подписки(например на свечи), возвращаемый канал можно игнорировать, так как при первом вызове он уже был получен
-	firstInstrumetsGroup := []string{}
+	firstInstrumetsGroup := []string{"BBG004730N88"}
 	candleChan, err := firstMDStream.SubscribeCandle(
 		firstInstrumetsGroup,
 		pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_ONE_MINUTE,
@@ -53,17 +53,16 @@ func main() {
 		logger.Errorf(err.Error())
 	}
 
-	secondInstrumetsGroup := []string{"BBG004730N88", "BBG00475KKY8", "BBG004RVFCY3"}
+	secondInstrumetsGroup := []string{"BBG00475KKY8", "BBG004RVFCY3"}
 
-	candleChan, err = firstMDStream.SubscribeCandle(
+	lastPriceChan, err := firstMDStream.SubscribeLastPrice(
 		secondInstrumetsGroup,
-		pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_ONE_MINUTE,
-		true,
-		nil,
 	)
 	if err != nil {
 		logger.Errorf(err.Error())
 	}
+
+	firstMDStream.UnSubscribeCandle(firstInstrumetsGroup, pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_ONE_MINUTE, true, nil)
 
 	// функцию Listen нужно вызвать один раз для каждого стрима и в отдельной горутине
 	// для остановки стрима можно использовать метод Stop, он отменяет контекст внутри стрима
@@ -93,7 +92,13 @@ func main() {
 					return
 				}
 				// клиентская логика обработки...
-				fmt.Println("high price = ", candle.GetHigh().ToFloat())
+				fmt.Println("Candle high price = ", candle.GetHigh().ToFloat())
+			case price, ok := <-lastPriceChan:
+				if !ok {
+					return
+				}
+				// клиентская логика обработки...
+				fmt.Println("Price high price = ", price.GetLastPriceType())
 			}
 		}
 	}(ctx)
