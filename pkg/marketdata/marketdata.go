@@ -17,7 +17,7 @@ type Candle struct {
 	Time           time.Time
 }
 
-type CandleData interface {
+type CandleProvider interface {
 	SubscribeCandles(marketDataInfo MarketDataInfo) (<-chan Candle, error)
 	UnsubscribeCandles(marketDataInfo MarketDataInfo, ch <-chan Candle) bool
 	GetCandles(marketDataInfo MarketDataInfo, from time.Time, to time.Time) ([]Candle, error)

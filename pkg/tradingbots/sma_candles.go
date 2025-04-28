@@ -10,23 +10,24 @@ import (
 )
 
 type SMACandlesBot struct {
-	candlesData  marketdata.CandleData
+	candlesData  marketdata.CandleProvider
 	exchanger    exchange.Exchanger
 	instrumentID string
 	interval     marketdata.MarketDataInterval
 	length       int
-	initialSum   float64
+	sum          float64
+	boughtCount  int
 	bought       bool
 	running      bool
 }
 
 func NewSMACandlesBot(
-	candlesData marketdata.CandleData,
+	candlesData marketdata.CandleProvider,
 	exchanger exchange.Exchanger,
 	instrumentID string,
 	interval marketdata.MarketDataInterval,
 	length int,
-	initialSum float64,
+	sum float64,
 ) *SMACandlesBot {
 	return &SMACandlesBot{
 		candlesData:  candlesData,
@@ -34,7 +35,7 @@ func NewSMACandlesBot(
 		instrumentID: instrumentID,
 		interval:     interval,
 		length:       length,
-		initialSum:   initialSum,
+		sum:          sum,
 	}
 }
 
@@ -135,30 +136,43 @@ func (bot *SMACandlesBot) run(candlesChan <-chan marketdata.Candle, sma *indicat
 		candle := <-candlesChan
 		smaValue := sma.Update(candle.Close)
 
-		orderInfo := exchange.OrderInfo{
-			InstrumentID: bot.instrumentID,
-			Quantity:     int64(bot.initialSum / candle.Low),
-			Price:        candle.Low,
-		}
-
 		if candle.Close > smaValue {
 			if !bot.bought {
+				count := int(bot.sum / candle.Low)
+				orderInfo := exchange.OrderInfo{
+					InstrumentID: bot.instrumentID,
+					Count:        count,
+					Price:        candle.Low,
+				}
+
 				turnover, err := bot.exchanger.Buy(orderInfo)
 				if err != nil {
 					log.Println("Error buying:", err)
 					continue
 				}
-				bot.initialSum -= turnover
+				log.Printf("Buy Candle: SMA %v, Order info %v", smaValue, orderInfo)
+				log.Printf("Sum: %v", bot.sum)
+				bot.sum -= turnover
+				bot.boughtCount += count
 				bot.bought = true
 			}
 		} else if candle.Close < smaValue {
 			if bot.bought {
+				orderInfo := exchange.OrderInfo{
+					InstrumentID: bot.instrumentID,
+					Count:        bot.boughtCount,
+					Price:        candle.Low,
+				}
+
 				turnover, err := bot.exchanger.Sell(orderInfo)
 				if err != nil {
 					log.Println("Error selling:", err)
 					continue
 				}
-				bot.initialSum += turnover
+				log.Printf("Sell Candle: SMA %v, Order info %v", smaValue, orderInfo)
+				log.Printf("Sum: %v", bot.sum)
+				bot.sum += turnover
+				bot.boughtCount = 0
 				bot.bought = false
 			}
 		}

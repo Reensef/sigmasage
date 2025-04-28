@@ -30,6 +30,15 @@ func main() {
 		panic(err)
 	}
 
+	instrumentsClient := client.NewInstrumentsServiceClient()
+
+	instrument, err := instrumentsClient.ShareByTicker("VKCO", "TQBR")
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(instrument)
+
 	mdStreamClient := client.NewMarketDataStreamClient()
 
 	// для синхронизации всех горутин
@@ -53,16 +62,16 @@ func main() {
 		logger.Errorf(err.Error())
 	}
 
-	secondInstrumetsGroup := []string{"BBG00475KKY8", "BBG004RVFCY3"}
+	// secondInstrumetsGroup := []string{"BBG00475KKY8", "BBG004RVFCY3"}
 
-	lastPriceChan, err := firstMDStream.SubscribeLastPrice(
-		secondInstrumetsGroup,
-	)
-	if err != nil {
-		logger.Errorf(err.Error())
-	}
+	// lastPriceChan, err := firstMDStream.SubscribeLastPrice(
+	// 	secondInstrumetsGroup,
+	// )
+	// if err != nil {
+	// 	logger.Errorf(err.Error())
+	// }
 
-	firstMDStream.UnSubscribeCandle(firstInstrumetsGroup, pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_ONE_MINUTE, true, nil)
+	// firstMDStream.UnSubscribeCandle(firstInstrumetsGroup, pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_ONE_MINUTE, true, nil)
 
 	// функцию Listen нужно вызвать один раз для каждого стрима и в отдельной горутине
 	// для остановки стрима можно использовать метод Stop, он отменяет контекст внутри стрима
@@ -93,12 +102,12 @@ func main() {
 				}
 				// клиентская логика обработки...
 				fmt.Println("Candle high price = ", candle.GetHigh().ToFloat())
-			case price, ok := <-lastPriceChan:
-				if !ok {
-					return
-				}
-				// клиентская логика обработки...
-				fmt.Println("Price high price = ", price.GetLastPriceType())
+				// case price, ok := <-lastPriceChan:
+				// 	if !ok {
+				// 		return
+				// 	}
+				// 	// клиентская логика обработки...
+				// 	fmt.Println("Price high price = ", price.GetLastPriceType())
 			}
 		}
 	}(ctx)

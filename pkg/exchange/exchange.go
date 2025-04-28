@@ -2,7 +2,7 @@ package exchange
 
 type OrderInfo struct {
 	InstrumentID string
-	Quantity     int64
+	Count        int
 	Price        float64
 }
 

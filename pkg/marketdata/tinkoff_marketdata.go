@@ -3,6 +3,7 @@ package marketdata
 import (
 	"context"
 	"fmt"
+	"log"
 	"os/signal"
 	"sync"
 	"syscall"
@@ -25,29 +26,27 @@ type TinkoffMarketdata struct {
 	isNotifyingCandlesSubscribers bool
 }
 
-func NewTinkoffMarketdata(token string) *TinkoffMarketdata {
+func NewTinkoffMarketdata(token string) (*TinkoffMarketdata, error) {
 	logger := utils.TinkoffLogger{}
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
-	defer cancel()
 
 	config := investgo.Config{
 		EndPoint:        "invest-public-api.tinkoff.ru:443",
-		Token:           "t.b8rY7Kv7HppxKdwCynTNbZbJ6kCzR09EbEQf5gAsJhGIOVU1oteZAit8eRdInD1pFxC8h8PvnAtumjuvcDn3pg",
+		Token:           token,
 		MaxRetries:      3,
 		AppName:         "sigmasage",
 		DisableAllRetry: false,
 	}
 
-	client, err := investgo.NewClient(ctx, config, logger)
+	client, err := investgo.NewClient(context.Background(), config, logger)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	mdStreamClient := client.NewMarketDataStreamClient()
 
 	mdStream, err := mdStreamClient.MarketDataStream()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	mdService := client.NewMarketDataServiceClient()
@@ -57,13 +56,13 @@ func NewTinkoffMarketdata(token string) *TinkoffMarketdata {
 		candleSubscribers: make(map[MarketDataInfo][]chan Candle),
 		mdStream:          mdStream,
 		mdService:         mdService,
-	}
+	}, nil
 }
 
 // Subscribe returns a channel that will receive candle data for the specified instrument
 func (t *TinkoffMarketdata) SubscribeCandles(marketDataInfo MarketDataInfo) (<-chan Candle, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	// t.mu.Lock()
+	// defer t.mu.Unlock()
 
 	ch := make(chan Candle, 100)
 
@@ -92,15 +91,18 @@ func (t *TinkoffMarketdata) SubscribeCandles(marketDataInfo MarketDataInfo) (<-c
 }
 
 // Unsubscribe removes a channel from the subscribers list
-func (t *TinkoffMarketdata) UnsubscribeCandles(marketDataInfo MarketDataInfo, ch <-chan Candle) {
+func (t *TinkoffMarketdata) UnsubscribeCandles(marketDataInfo MarketDataInfo, ch <-chan Candle) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	ok := false
 
 	if subscribers, exists := t.candleSubscribers[marketDataInfo]; exists {
 		for i, subscriber := range subscribers {
 			if subscriber == ch {
 				t.candleSubscribers[marketDataInfo] = append(subscribers[:i], subscribers[i+1:]...)
 				close(subscriber)
+				ok = true
 				break
 			}
 		}
@@ -109,11 +111,21 @@ func (t *TinkoffMarketdata) UnsubscribeCandles(marketDataInfo MarketDataInfo, ch
 			delete(t.candleSubscribers, marketDataInfo)
 		}
 	}
+
+	return ok
 }
 
 func (t *TinkoffMarketdata) startNotifyingCandlesSubscribers(candlesChan <-chan *pb.Candle) {
 	var ctx context.Context
 	ctx, t.candlesNotifyCancel = signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
+
+	go func() {
+		// defer wg.Done()
+		err := t.mdStream.Listen()
+		if err != nil {
+			log.Printf("Error listening to candles: %v", err)
+		}
+	}()
 
 	go func(ctx context.Context) {
 		for {
@@ -130,16 +142,20 @@ func (t *TinkoffMarketdata) startNotifyingCandlesSubscribers(candlesChan <-chan 
 	}(ctx)
 }
 
-func (t *TinkoffMarketdata) GetCandles(marketDataInfo MarketDataInfo, length int) ([]Candle, error) {
-	result := make([]Candle, 0, length)
+func (t *TinkoffMarketdata) GetCandles(
+	marketDataInfo MarketDataInfo,
+	from time.Time,
+	to time.Time,
+) ([]Candle, error) {
+	result := make([]Candle, 0)
 
 	resp, err := t.mdService.GetCandles(
 		marketDataInfo.IntrumentID,
 		t.convertToCandleInterval(marketDataInfo.Interval),
-		time.Now().Add(-convertMarketDataIntervalToTime(marketDataInfo.Interval)*time.Duration(length)),
-		time.Now(),
+		from,
+		to,
 		pb.GetCandlesRequest_CANDLE_SOURCE_EXCHANGE,
-		int32(length),
+		0,
 	)
 
 	if err != nil {
