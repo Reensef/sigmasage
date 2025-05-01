@@ -6,12 +6,12 @@ import (
 )
 
 type SMACalculator struct {
-	windowSize int        // Размер окна SMA
-	windowSum  float64    // Текущая сумма значений в окне
-	r          *ring.Ring // Очередь для хранения значений
+	windowSize int        // SMA window size
+	windowSum  float64    // Current sum of values in the window
+	r          *ring.Ring // Queue for storing values
 }
 
-// Создание нового SMA
+// Create new SMA
 func NewSMACalculator(windowSize int, initialData []float64) (*SMACalculator, error) {
 	if len(initialData) != windowSize {
 		return nil, fmt.Errorf("initial data length (%d) must match window size (%d)", len(initialData), windowSize)
@@ -33,13 +33,12 @@ func NewSMACalculator(windowSize int, initialData []float64) (*SMACalculator, er
 	return sma, nil
 }
 
-// Обновление SMA новым значением
 func (sma *SMACalculator) Update(value float64) float64 {
-	// Удаляем старое значение
+	// Remove oldest value from sum
 	oldestValue := sma.r.Value.(float64)
 	sma.windowSum -= oldestValue
 
-	// Добавляем новое значение
+	// Add new value
 	sma.r.Value = value
 	sma.r = sma.r.Next()
 	sma.windowSum += value

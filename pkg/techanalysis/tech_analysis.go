@@ -75,6 +75,51 @@ func (t *TechAnalysisService) UnsubscribeSMA(info SMAInfo, ch <-chan SMA) error 
 	return fmt.Errorf("undefined subscriber")
 }
 
+func (t *TechAnalysisService) GetSMAHistory(info SMAInfo, from time.Time, to time.Time) ([]SMA, error) {
+	timeFrame := marketdata.ConvertMarketDataIntervalToTime(info.marketData.Interval)
+
+	if !from.Truncate(timeFrame).Equal(from) || !to.Truncate(timeFrame).Equal(to) {
+		return nil, fmt.Errorf("from and to must be aligned to marketdata interval: %s", timeFrame.String())
+	}
+
+	historyData, err := t.mdService.GetCandles(
+		info.marketData,
+		from.Add(-time.Duration(info.length)*timeFrame),
+		to,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if len(historyData) < info.length+int(to.Sub(from)/timeFrame) {
+		return nil, fmt.Errorf("not enough data to calculate SMA")
+	}
+
+	smaSrc := make([]float64, 0)
+	for _, candle := range historyData {
+		smaSrc = append(smaSrc, candle.Close)
+	}
+
+	smaCalculator, err := NewSMACalculator(info.length, smaSrc[:info.length])
+	if err != nil {
+		return nil, err
+	}
+
+	smaResults := make([]SMA, 0)
+
+	for _, candle := range historyData[info.length:] {
+		sma := smaCalculator.Update(candle.Close)
+		smaResults = append(smaResults, SMA{
+			Info:  info,
+			Value: sma,
+			Time:  candle.Time,
+		})
+	}
+
+	return smaResults, nil
+}
+
 func (t *TechAnalysisService) startCalculateSMA(info SMAInfo, ctx context.Context) {
 	candlesChan, err := t.mdService.SubscribeCandles(marketdata.MarketData{
 		ID:       info.marketData.ID,

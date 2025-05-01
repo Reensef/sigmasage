@@ -4,6 +4,9 @@ import (
 	"log"
 )
 
+// TODO Need rename
+// This is a implementation of logger for tinkoff api
+// He has methods of uber zap logger
 type TinkoffLogger struct {
 }
 
