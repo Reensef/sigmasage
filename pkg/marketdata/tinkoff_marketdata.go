@@ -11,22 +11,24 @@ import (
 
 	"github.com/Reensef/sigmasage/pkg/utils"
 
+	"slices"
+
 	"github.com/russianinvestments/invest-api-go-sdk/investgo"
 	pb "github.com/russianinvestments/invest-api-go-sdk/proto"
 )
 
-// TinkoffMarketdata implements an observer that distributes candle data to subscribers
-type TinkoffMarketdata struct {
+// TinkoffMarketDataProvider implements an observer that distributes candle data to subscribers
+type TinkoffMarketDataProvider struct {
 	token                         string
 	mu                            sync.RWMutex
 	mdStream                      *investgo.MarketDataStream
 	mdService                     *investgo.MarketDataServiceClient
-	candleSubscribers             map[MarketDataInfo][]chan Candle
+	candleSubscribers             map[MarketData][]chan Candle
 	candlesNotifyCancel           context.CancelFunc
 	isNotifyingCandlesSubscribers bool
 }
 
-func NewTinkoffMarketdata(token string) (*TinkoffMarketdata, error) {
+func NewTinkoffMarketdata(token string) (*TinkoffMarketDataProvider, error) {
 	logger := utils.TinkoffLogger{}
 
 	config := investgo.Config{
@@ -51,16 +53,16 @@ func NewTinkoffMarketdata(token string) (*TinkoffMarketdata, error) {
 
 	mdService := client.NewMarketDataServiceClient()
 
-	return &TinkoffMarketdata{
+	return &TinkoffMarketDataProvider{
 		token:             token,
-		candleSubscribers: make(map[MarketDataInfo][]chan Candle),
+		candleSubscribers: make(map[MarketData][]chan Candle),
 		mdStream:          mdStream,
 		mdService:         mdService,
 	}, nil
 }
 
 // Subscribe returns a channel that will receive candle data for the specified instrument
-func (t *TinkoffMarketdata) SubscribeCandles(marketDataInfo MarketDataInfo) (<-chan Candle, error) {
+func (t *TinkoffMarketDataProvider) SubscribeCandles(marketDataInfo MarketData) (<-chan Candle, error) {
 	// t.mu.Lock()
 	// defer t.mu.Unlock()
 
@@ -72,7 +74,7 @@ func (t *TinkoffMarketdata) SubscribeCandles(marketDataInfo MarketDataInfo) (<-c
 	t.candleSubscribers[marketDataInfo] = append(t.candleSubscribers[marketDataInfo], ch)
 
 	candlesChan, err := t.mdStream.SubscribeCandle(
-		[]string{marketDataInfo.IntrumentID},
+		[]string{marketDataInfo.ID},
 		t.convertToSubscriptionInterval(marketDataInfo.Interval),
 		true,
 		nil,
@@ -83,7 +85,7 @@ func (t *TinkoffMarketdata) SubscribeCandles(marketDataInfo MarketDataInfo) (<-c
 	}
 
 	if !t.isNotifyingCandlesSubscribers {
-		t.startNotifyingCandlesSubscribers(candlesChan)
+		t.startNotifyingCandlesSubscribers(marketDataInfo, candlesChan)
 		t.isNotifyingCandlesSubscribers = true
 	}
 
@@ -91,31 +93,30 @@ func (t *TinkoffMarketdata) SubscribeCandles(marketDataInfo MarketDataInfo) (<-c
 }
 
 // Unsubscribe removes a channel from the subscribers list
-func (t *TinkoffMarketdata) UnsubscribeCandles(marketDataInfo MarketDataInfo, ch <-chan Candle) bool {
+func (t *TinkoffMarketDataProvider) UnsubscribeCandles(marketDataInfo MarketData, ch <-chan Candle) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-
-	ok := false
 
 	if subscribers, exists := t.candleSubscribers[marketDataInfo]; exists {
 		for i, subscriber := range subscribers {
 			if subscriber == ch {
-				t.candleSubscribers[marketDataInfo] = append(subscribers[:i], subscribers[i+1:]...)
+				t.candleSubscribers[marketDataInfo] = slices.Delete(subscribers, i, i+1)
 				close(subscriber)
-				ok = true
-				break
+
+				if len(t.candleSubscribers[marketDataInfo]) == 0 {
+					delete(t.candleSubscribers, marketDataInfo)
+				}
+
+				return nil
 			}
 		}
 
-		if len(t.candleSubscribers[marketDataInfo]) == 0 {
-			delete(t.candleSubscribers, marketDataInfo)
-		}
 	}
 
-	return ok
+	return fmt.Errorf("undefined subscriber")
 }
 
-func (t *TinkoffMarketdata) startNotifyingCandlesSubscribers(candlesChan <-chan *pb.Candle) {
+func (t *TinkoffMarketDataProvider) startNotifyingCandlesSubscribers(marketdata MarketData, candlesChan <-chan *pb.Candle) {
 	var ctx context.Context
 	ctx, t.candlesNotifyCancel = signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
 
@@ -132,25 +133,39 @@ func (t *TinkoffMarketdata) startNotifyingCandlesSubscribers(candlesChan <-chan 
 			select {
 			case <-ctx.Done():
 				return
-			case candle, ok := <-candlesChan:
+			case pbCandle, ok := <-candlesChan:
 				if !ok {
 					return
 				}
-				fmt.Println("Candle high price = ", candle.GetHigh().ToFloat())
+
+				candle := Candle{
+					MarketData: marketdata,
+					Time:       pbCandle.GetTime().AsTime(),
+					Open:       pbCandle.GetOpen().ToFloat(),
+					High:       pbCandle.GetHigh().ToFloat(),
+					Low:        pbCandle.GetLow().ToFloat(),
+					Close:      pbCandle.GetClose().ToFloat(),
+					Volume:     float64(pbCandle.GetVolume()),
+				}
+				t.mu.RLock()
+				for _, subscriber := range t.candleSubscribers[marketdata] {
+					subscriber <- candle
+				}
+				t.mu.RUnlock()
 			}
 		}
 	}(ctx)
 }
 
-func (t *TinkoffMarketdata) GetCandles(
-	marketDataInfo MarketDataInfo,
+func (t *TinkoffMarketDataProvider) GetCandles(
+	marketDataInfo MarketData,
 	from time.Time,
 	to time.Time,
 ) ([]Candle, error) {
 	result := make([]Candle, 0)
 
 	resp, err := t.mdService.GetCandles(
-		marketDataInfo.IntrumentID,
+		marketDataInfo.ID,
 		t.convertToCandleInterval(marketDataInfo.Interval),
 		from,
 		to,
@@ -176,7 +191,7 @@ func (t *TinkoffMarketdata) GetCandles(
 	return result, nil
 }
 
-func (t *TinkoffMarketdata) convertToSubscriptionInterval(interval MarketDataInterval) pb.SubscriptionInterval {
+func (t *TinkoffMarketDataProvider) convertToSubscriptionInterval(interval MarketDataInterval) pb.SubscriptionInterval {
 	switch interval {
 	case UNSPECIFIED:
 		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_UNSPECIFIED
@@ -211,7 +226,7 @@ func (t *TinkoffMarketdata) convertToSubscriptionInterval(interval MarketDataInt
 	}
 }
 
-func (t *TinkoffMarketdata) convertToCandleInterval(interval MarketDataInterval) pb.CandleInterval {
+func (t *TinkoffMarketDataProvider) convertToCandleInterval(interval MarketDataInterval) pb.CandleInterval {
 	switch interval {
 	case UNSPECIFIED:
 		return pb.CandleInterval_CANDLE_INTERVAL_UNSPECIFIED

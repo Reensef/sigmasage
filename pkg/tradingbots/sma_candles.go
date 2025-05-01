@@ -10,7 +10,7 @@ import (
 )
 
 type SMACandlesBot struct {
-	candlesData  marketdata.CandleProvider
+	candlesData  marketdata.MarketDataProvider
 	exchanger    exchange.Exchanger
 	instrumentID string
 	interval     marketdata.MarketDataInterval
@@ -22,7 +22,7 @@ type SMACandlesBot struct {
 }
 
 func NewSMACandlesBot(
-	candlesData marketdata.CandleProvider,
+	candlesData marketdata.MarketDataProvider,
 	exchanger exchange.Exchanger,
 	instrumentID string,
 	interval marketdata.MarketDataInterval,
@@ -49,9 +49,9 @@ func (bot *SMACandlesBot) RunReal() {
 	wasHistoryLoaded := false
 
 	go func() {
-		historicalCandles, err := bot.candlesData.GetCandles(marketdata.MarketDataInfo{
-			IntrumentID: bot.instrumentID,
-			Interval:    bot.interval,
+		historicalCandles, err := bot.candlesData.GetCandles(marketdata.MarketData{
+			ID:       bot.instrumentID,
+			Interval: bot.interval,
 		}, time.Now().Add(-time.Duration(bot.length)*marketdata.ConvertMarketDataIntervalToTime(bot.interval)), time.Now())
 		if err != nil {
 			log.Println("Error getting historical candles:", err)
@@ -64,9 +64,9 @@ func (bot *SMACandlesBot) RunReal() {
 		wasHistoryLoaded = true
 	}()
 
-	candlesChan, err := bot.candlesData.SubscribeCandles(marketdata.MarketDataInfo{
-		IntrumentID: bot.instrumentID,
-		Interval:    bot.interval,
+	candlesChan, err := bot.candlesData.SubscribeCandles(marketdata.MarketData{
+		ID:       bot.instrumentID,
+		Interval: bot.interval,
 	})
 	if err != nil {
 		log.Println("Error subscribing to candles:", err)
@@ -100,9 +100,9 @@ func (bot *SMACandlesBot) RunHistory(from time.Time, to time.Time) {
 
 	sma := indicators.NewSMA(bot.length)
 
-	mdInfo := marketdata.MarketDataInfo{
-		IntrumentID: bot.instrumentID,
-		Interval:    bot.interval,
+	mdInfo := marketdata.MarketData{
+		ID:       bot.instrumentID,
+		Interval: bot.interval,
 	}
 
 	historicalCandles, err := bot.candlesData.GetCandles(

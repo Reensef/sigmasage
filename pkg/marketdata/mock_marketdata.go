@@ -12,19 +12,19 @@ import (
 // TinkoffMarketdata implements an observer that distributes candle data to subscribers
 type MockMarketdata struct {
 	mu                            sync.RWMutex
-	candleSubscribers             map[MarketDataInfo][]chan Candle
+	candleSubscribers             map[MarketData][]chan Candle
 	candlesNotifyCancel           context.CancelFunc
 	isNotifyingCandlesSubscribers bool
 }
 
 func NewMockMarketdata() *MockMarketdata {
 	return &MockMarketdata{
-		candleSubscribers: make(map[MarketDataInfo][]chan Candle),
+		candleSubscribers: make(map[MarketData][]chan Candle),
 	}
 }
 
 // Subscribe returns a channel that will receive candle data for the specified instrument
-func (t *MockMarketdata) SubscribeCandles(marketDataInfo MarketDataInfo) (<-chan Candle, error) {
+func (t *MockMarketdata) SubscribeCandles(marketDataInfo MarketData) (<-chan Candle, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -44,7 +44,7 @@ func (t *MockMarketdata) SubscribeCandles(marketDataInfo MarketDataInfo) (<-chan
 }
 
 // Unsubscribe removes a channel from the subscribers list
-func (t *MockMarketdata) UnsubscribeCandles(marketDataInfo MarketDataInfo, ch <-chan Candle) {
+func (t *MockMarketdata) UnsubscribeCandles(marketDataInfo MarketData, ch <-chan Candle) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -63,7 +63,7 @@ func (t *MockMarketdata) UnsubscribeCandles(marketDataInfo MarketDataInfo, ch <-
 	}
 }
 
-func (t *MockMarketdata) startNotifyingCandlesSubscribers(info MarketDataInfo) {
+func (t *MockMarketdata) startNotifyingCandlesSubscribers(info MarketData) {
 	var ctx context.Context
 	ctx, t.candlesNotifyCancel = signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
 
@@ -90,6 +90,7 @@ func (t *MockMarketdata) startNotifyingCandlesSubscribers(info MarketDataInfo) {
 				return
 			case <-ticker.C:
 				t.mu.RLock()
+				/// ???
 				for _, subscribers := range t.candleSubscribers {
 					for _, subscriber := range subscribers {
 						subscriber <- mockCandles[currentCandleIndex]
