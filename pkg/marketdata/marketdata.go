@@ -18,7 +18,8 @@ type Candle struct {
 	Low        float64
 	Close      float64
 	Volume     float64
-	Time       time.Time
+	StartTime  time.Time
+	EndTime    time.Time
 }
 
 type MarketDataProvider interface {

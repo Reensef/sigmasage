@@ -69,16 +69,16 @@ func (t *MockMarketdata) startNotifyingCandlesSubscribers(info MarketData) {
 
 	go func(ctx context.Context) {
 		mockCandles := []Candle{
-			{info, 100.0, 99.0, 100.0, 100.0, 100.0, time.Now()},
-			{info, 102.0, 101.0, 102.0, 102.0, 102.0, time.Now()},
-			{info, 101.0, 100.0, 101.0, 101.0, 101.0, time.Now()},
-			{info, 103.0, 102.0, 103.0, 103.0, 103.0, time.Now()},
-			{info, 98.0, 97.0, 98.0, 98.0, 98.0, time.Now()},
-			{info, 99.0, 98.0, 99.0, 99.0, 99.0, time.Now()},
-			{info, 101.5, 100.5, 101.5, 101.5, 101.5, time.Now()},
-			{info, 102.5, 101.5, 102.5, 102.5, 102.5, time.Now()},
-			{info, 100.5, 99.5, 100.5, 100.5, 100.5, time.Now()},
-			{info, 101.8, 100.8, 101.8, 101.8, 101.8, time.Now()},
+			{info, 100.0, 99.0, 100.0, 100.0, 100.0, time.Now(), time.Now()},
+			{info, 102.0, 101.0, 102.0, 102.0, 102.0, time.Now(), time.Now()},
+			{info, 101.0, 100.0, 101.0, 101.0, 101.0, time.Now(), time.Now()},
+			{info, 103.0, 102.0, 103.0, 103.0, 103.0, time.Now(), time.Now()},
+			{info, 98.0, 97.0, 98.0, 98.0, 98.0, time.Now(), time.Now()},
+			{info, 99.0, 98.0, 99.0, 99.0, 99.0, time.Now(), time.Now()},
+			{info, 101.5, 100.5, 101.5, 101.5, 101.5, time.Now(), time.Now()},
+			{info, 102.5, 101.5, 102.5, 102.5, 102.5, time.Now(), time.Now()},
+			{info, 100.5, 99.5, 100.5, 100.5, 100.5, time.Now(), time.Now()},
+			{info, 101.8, 100.8, 101.8, 101.8, 101.8, time.Now(), time.Now()},
 		}
 		currentCandleIndex := 0
 		ticker := time.NewTicker(1 * time.Minute)

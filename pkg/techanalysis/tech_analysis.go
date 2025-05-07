@@ -11,8 +11,8 @@ import (
 )
 
 type SMAInfo struct {
-	marketData marketdata.MarketData
-	length     int
+	MarketData marketdata.MarketData
+	Length     int
 }
 type SMA struct {
 	Info  SMAInfo
@@ -30,7 +30,9 @@ func NewTechAnalysisService(
 	mdService marketdata.MarketDataServicer,
 ) (*TechAnalysisService, error) {
 	return &TechAnalysisService{
-		mdService: mdService,
+		mdService:        mdService,
+		smaSubscribers:   make(map[SMAInfo][]chan SMA),
+		smaStreamCancels: make(map[SMAInfo]context.CancelFunc),
 	}, nil
 }
 
@@ -76,15 +78,15 @@ func (t *TechAnalysisService) UnsubscribeSMA(info SMAInfo, ch <-chan SMA) error 
 }
 
 func (t *TechAnalysisService) GetSMAHistory(info SMAInfo, from time.Time, to time.Time) ([]SMA, error) {
-	timeFrame := marketdata.ConvertMarketDataIntervalToTime(info.marketData.Interval)
+	timeFrame := marketdata.ConvertMarketDataIntervalToTime(info.MarketData.Interval)
 
 	if !from.Truncate(timeFrame).Equal(from) || !to.Truncate(timeFrame).Equal(to) {
 		return nil, fmt.Errorf("from and to must be aligned to marketdata interval: %s", timeFrame.String())
 	}
 
 	historyData, err := t.mdService.GetCandles(
-		info.marketData,
-		from.Add(-time.Duration(info.length)*timeFrame),
+		info.MarketData,
+		from.Add(-time.Duration(info.Length)*timeFrame),
 		to,
 	)
 
@@ -92,7 +94,7 @@ func (t *TechAnalysisService) GetSMAHistory(info SMAInfo, from time.Time, to tim
 		return nil, err
 	}
 
-	if len(historyData) < info.length+int(to.Sub(from)/timeFrame) {
+	if len(historyData) < info.Length+int(to.Sub(from)/timeFrame) {
 		return nil, fmt.Errorf("not enough data to calculate SMA")
 	}
 
@@ -101,19 +103,19 @@ func (t *TechAnalysisService) GetSMAHistory(info SMAInfo, from time.Time, to tim
 		smaSrc = append(smaSrc, candle.Close)
 	}
 
-	smaCalculator, err := NewSMACalculator(info.length, smaSrc[:info.length])
+	smaCalculator, err := NewSMACalculator(info.Length, smaSrc[:info.Length])
 	if err != nil {
 		return nil, err
 	}
 
 	smaResults := make([]SMA, 0)
 
-	for _, candle := range historyData[info.length:] {
+	for _, candle := range historyData[info.Length:] {
 		sma := smaCalculator.Update(candle.Close)
 		smaResults = append(smaResults, SMA{
 			Info:  info,
 			Value: sma,
-			Time:  candle.Time,
+			Time:  candle.StartTime,
 		})
 	}
 
@@ -121,19 +123,16 @@ func (t *TechAnalysisService) GetSMAHistory(info SMAInfo, from time.Time, to tim
 }
 
 func (t *TechAnalysisService) startCalculateSMA(info SMAInfo, ctx context.Context) {
-	candlesChan, err := t.mdService.SubscribeCandles(marketdata.MarketData{
-		ID:       info.marketData.ID,
-		Interval: info.marketData.Interval,
-	})
+	candlesChan, err := t.mdService.SubscribeCandles(info.MarketData)
 
 	if err != nil {
 		log.Println("Error subscribing to candles:", err)
 		return
 	}
 
-	duration := time.Duration(info.length) * marketdata.ConvertMarketDataIntervalToTime(info.marketData.Interval)
+	duration := time.Duration(info.Length) * marketdata.ConvertMarketDataIntervalToTime(info.MarketData.Interval)
 	historyData, err := t.mdService.GetCandles(
-		info.marketData,
+		info.MarketData,
 		time.Now().Add(-duration),
 		time.Now(),
 	)
@@ -148,7 +147,7 @@ func (t *TechAnalysisService) startCalculateSMA(info SMAInfo, ctx context.Contex
 		smaSrc = append(smaSrc, candle.Close)
 	}
 
-	smaCalculator, err := NewSMACalculator(info.length, smaSrc)
+	smaCalculator, err := NewSMACalculator(info.Length, smaSrc)
 	if err != nil {
 		log.Println("Error creating SMA calculator:", err)
 		return
@@ -170,7 +169,7 @@ func (t *TechAnalysisService) startCalculateSMA(info SMAInfo, ctx context.Contex
 				subscriber <- SMA{
 					Info:  info,
 					Value: sma,
-					Time:  candle.Time,
+					Time:  candle.EndTime,
 				}
 			}
 		}

@@ -3,40 +3,47 @@ package strategy
 import (
 	"context"
 	"fmt"
-	"log"
 	"slices"
+	"time"
 
 	"github.com/Reensef/sigmasage/pkg/marketdata"
+	"github.com/Reensef/sigmasage/pkg/techanalysis"
 )
 
-// Конфиг стратегии пересечения скользящих средних (SimpleMovingAvgCross)
-type SMACStrategyConfig struct {
-	MarketData marketdata.MarketData
-	SMAPeriod  int
-}
-
 // Сигнал стратегии пересечения скользящих средних (SimpleMovingAvgCross)
-type SMACStrategySignal struct{}
+type SMACSignal int
+
+const (
+	SMACSignal_UPWARDS_CROSS SMACSignal = iota
+	SMACSignal_DOWNWARDS_CROSS
+)
 
 type StrategyService struct {
 	mdService               *marketdata.MarketDataService
-	smacStrategySubscribers map[SMACStrategyConfig][]chan SMACStrategySignal
-	smacStrategyRunners     map[SMACStrategyConfig][]context.CancelFunc
+	techAnalysisService     *techanalysis.TechAnalysisService
+	smacStrategySubscribers map[techanalysis.SMAInfo][]chan SMACSignal
+	smacStrategyRunners     map[techanalysis.SMAInfo][]context.CancelFunc
 }
 
-func NewStrategyService(mdService *marketdata.MarketDataService) (*StrategyService, error) {
+func NewStrategyService(
+	mdService *marketdata.MarketDataService,
+	techAnalysisService *techanalysis.TechAnalysisService,
+) (*StrategyService, error) {
 	return &StrategyService{
-		mdService: mdService,
+		mdService:               mdService,
+		techAnalysisService:     techAnalysisService,
+		smacStrategySubscribers: make(map[techanalysis.SMAInfo][]chan SMACSignal),
+		smacStrategyRunners:     make(map[techanalysis.SMAInfo][]context.CancelFunc),
 	}, nil
 }
 
 func (s *StrategyService) SubscribeSMACStrategy(
-	config SMACStrategyConfig,
-) (<-chan SMACStrategySignal, error) {
-	ch := make(chan SMACStrategySignal, 100)
+	config techanalysis.SMAInfo,
+) (<-chan SMACSignal, error) {
+	ch := make(chan SMACSignal, 100)
 
 	if _, exists := s.smacStrategySubscribers[config]; !exists {
-		s.smacStrategySubscribers[config] = make([]chan SMACStrategySignal, 0)
+		s.smacStrategySubscribers[config] = make([]chan SMACSignal, 0)
 
 		err := s.runSMACStrategy(config)
 		if err != nil {
@@ -49,8 +56,8 @@ func (s *StrategyService) SubscribeSMACStrategy(
 }
 
 func (s *StrategyService) UnsubscribeSMACStrategy(
-	config SMACStrategyConfig,
-	ch <-chan SMACStrategySignal,
+	config techanalysis.SMAInfo,
+	ch <-chan SMACSignal,
 ) error {
 	ok := false
 
@@ -77,27 +84,109 @@ func (s *StrategyService) UnsubscribeSMACStrategy(
 }
 
 func (s *StrategyService) runSMACStrategy(
-	config SMACStrategyConfig,
+	config techanalysis.SMAInfo,
 ) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.smacStrategyRunners[config] = append(s.smacStrategyRunners[config], cancel)
 
+	candlesChan, err := s.mdService.SubscribeCandles(config.MarketData)
+	if err != nil {
+		return err
+	}
+
+	smaChan, err := s.techAnalysisService.SubscribeSMA(config)
+	if err != nil {
+		return err
+	}
+
 	go func(ctx context.Context) {
-		candlesChan, err := s.mdService.SubscribeCandles(config.MarketData)
-		if err != nil {
+		firstCandle, firstSMA := s.syncSMACData(candlesChan, smaChan, ctx)
+
+		if firstCandle == nil || firstSMA == nil {
+			s.mdService.UnsubscribeCandles(config.MarketData, candlesChan)
 			return
 		}
+
+		isCandleCloseAbove := firstCandle.Close > firstSMA.Value
+		recvCandle := *firstCandle
+		recvSMA := *firstSMA
+
+		makeDecision := func(candle marketdata.Candle, sma techanalysis.SMA) {
+			if candle.Close > sma.Value {
+				if !isCandleCloseAbove {
+					s.notifySMACSubscribers(config, SMACSignal_UPWARDS_CROSS)
+					isCandleCloseAbove = true
+				}
+			} else if candle.Close < recvSMA.Value {
+				if isCandleCloseAbove {
+					s.notifySMACSubscribers(config, SMACSignal_DOWNWARDS_CROSS)
+					isCandleCloseAbove = false
+				}
+			}
+		}
+
 		for {
 			select {
 			case <-ctx.Done():
 				s.mdService.UnsubscribeCandles(config.MarketData, candlesChan)
 				return
 			case candle := <-candlesChan:
-				log.Printf("candle: %v", candle)
-				// Тут должен быть код, который будет обрабатывать свечу и индикаторы
+				recvCandle = candle
+
+				if time.Until(candle.EndTime).Abs() < time.Second {
+					if recvCandle.EndTime == recvSMA.Time {
+						makeDecision(recvCandle, recvSMA)
+					}
+				}
+			case sma := <-smaChan:
+				recvSMA = sma
+
+				if time.Until(recvSMA.Time).Abs() < time.Second {
+					if recvCandle.EndTime == recvSMA.Time {
+						makeDecision(recvCandle, recvSMA)
+					}
+				}
 			}
 		}
 	}(ctx)
 
 	return nil
+}
+
+func (s *StrategyService) syncSMACData(
+	candlesChan <-chan marketdata.Candle,
+	smaChan <-chan techanalysis.SMA,
+	ctx context.Context,
+) (*marketdata.Candle, *techanalysis.SMA) {
+	var candle *marketdata.Candle
+	var sma *techanalysis.SMA
+
+	for {
+		select {
+		case <-ctx.Done():
+			return candle, sma
+		case recvCandle := <-candlesChan:
+			candle = &recvCandle
+
+			if sma != nil && candle.EndTime == sma.Time {
+				return candle, sma
+			}
+		case recvSMA := <-smaChan:
+			sma = &recvSMA
+			if candle != nil && candle.EndTime == sma.Time {
+				return candle, sma
+			}
+		}
+	}
+}
+
+func (s *StrategyService) notifySMACSubscribers(info techanalysis.SMAInfo, signal SMACSignal) {
+	subscribers, exists := s.smacStrategySubscribers[info]
+	if !exists {
+		return
+	}
+
+	for _, subscriber := range subscribers {
+		subscriber <- signal
+	}
 }

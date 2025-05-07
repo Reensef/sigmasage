@@ -44,6 +44,16 @@ func NewTinkoffMarketdata(token string) (*TinkoffMarketDataProvider, error) {
 		return nil, err
 	}
 
+	instrumentsService := client.NewInstrumentsServiceClient()
+
+	instrResp, err := instrumentsService.ShareByTicker("SBER", "TQBR")
+	if err != nil {
+		logger.Errorf(err.Error())
+	} else {
+		ins := instrResp.GetInstrument()
+		fmt.Printf("Инструменты по запросу SBER - %v %v\n", ins.GetName(), ins.GetUid())
+	}
+
 	mdStreamClient := client.NewMarketDataStreamClient()
 
 	mdStream, err := mdStreamClient.MarketDataStream()
@@ -110,7 +120,6 @@ func (t *TinkoffMarketDataProvider) UnsubscribeCandles(marketDataInfo MarketData
 				return nil
 			}
 		}
-
 	}
 
 	return fmt.Errorf("undefined subscriber")
@@ -121,7 +130,6 @@ func (t *TinkoffMarketDataProvider) startNotifyingCandlesSubscribers(marketdata 
 	ctx, t.candlesNotifyCancel = signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
 
 	go func() {
-		// defer wg.Done()
 		err := t.mdStream.Listen()
 		if err != nil {
 			log.Printf("Error listening to candles: %v", err)
@@ -140,7 +148,8 @@ func (t *TinkoffMarketDataProvider) startNotifyingCandlesSubscribers(marketdata 
 
 				candle := Candle{
 					MarketData: marketdata,
-					Time:       pbCandle.GetTime().AsTime(),
+					StartTime:  pbCandle.GetTime().AsTime(),
+					EndTime:    pbCandle.GetTime().AsTime().Add(time.Duration(ConvertMarketDataIntervalToTime(marketdata.Interval))),
 					Open:       pbCandle.GetOpen().ToFloat(),
 					High:       pbCandle.GetHigh().ToFloat(),
 					Low:        pbCandle.GetLow().ToFloat(),
@@ -158,15 +167,15 @@ func (t *TinkoffMarketDataProvider) startNotifyingCandlesSubscribers(marketdata 
 }
 
 func (t *TinkoffMarketDataProvider) GetCandles(
-	marketDataInfo MarketData,
+	marketData MarketData,
 	from time.Time,
 	to time.Time,
 ) ([]Candle, error) {
 	result := make([]Candle, 0)
 
 	resp, err := t.mdService.GetCandles(
-		marketDataInfo.ID,
-		t.convertToCandleInterval(marketDataInfo.Interval),
+		marketData.ID,
+		t.convertToCandleInterval(marketData.Interval),
 		from,
 		to,
 		pb.GetCandlesRequest_CANDLE_SOURCE_EXCHANGE,
@@ -179,12 +188,14 @@ func (t *TinkoffMarketDataProvider) GetCandles(
 
 	for _, candle := range resp.GetCandles() {
 		result = append(result, Candle{
-			Time:   candle.GetTime().AsTime(),
-			Open:   candle.GetOpen().ToFloat(),
-			High:   candle.GetHigh().ToFloat(),
-			Low:    candle.GetLow().ToFloat(),
-			Close:  candle.GetClose().ToFloat(),
-			Volume: float64(candle.GetVolume()),
+			MarketData: marketData,
+			StartTime:  candle.GetTime().AsTime(),
+			EndTime:    candle.GetTime().AsTime().Add(time.Duration(ConvertMarketDataIntervalToTime(marketData.Interval))),
+			Open:       candle.GetOpen().ToFloat(),
+			High:       candle.GetHigh().ToFloat(),
+			Low:        candle.GetLow().ToFloat(),
+			Close:      candle.GetClose().ToFloat(),
+			Volume:     float64(candle.GetVolume()),
 		})
 	}
 
