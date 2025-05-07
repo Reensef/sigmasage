@@ -2,10 +2,13 @@ package app
 
 import (
 	"log"
+	"time"
 
 	"github.com/Reensef/sigmasage/internal/telegram/tgsender"
 	"github.com/Reensef/sigmasage/internal/telegram/tgserver"
 	"github.com/Reensef/sigmasage/pkg/env"
+	"github.com/Reensef/sigmasage/pkg/marketdata"
+	"github.com/Reensef/sigmasage/pkg/techanalysis"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
@@ -25,6 +28,35 @@ func Run() {
 
 	receiver := tgserver.NewServer(tgbot, sender)
 	receiver.Run()
+
+	md, err := marketdata.NewMarketDataService(env.MustString("TINKOFF_MARKET_DATA_API_TOKEN"))
+	if err != nil {
+		log.Panic(err)
+	}
+
+	techAnalysis, err := techanalysis.NewTechAnalysisService(md)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	result, err := techAnalysis.GetSMAHistory(techanalysis.SMAInfo{
+		MarketData: marketdata.MarketData{
+			ID:           "e6123145-9665-43e0-8413-cd61b8aa9b13",
+			Interval:     marketdata.ONE_MINUTE,
+			ProviderType: marketdata.TINKOFF,
+		},
+		Length: 50,
+	}, time.Now().UTC().Truncate(time.Minute).Add(-time.Hour), time.Now().UTC().Truncate(time.Minute))
+
+	if err != nil {
+		log.Panic(err)
+	}
+
+	for _, sma := range result {
+		log.Printf("SMA: %v", sma)
+	}
+
+	// strategyService, err := strategy.NewStrategyService(md, techAnalysis)
 
 	// Need graceful shutdown
 	for {

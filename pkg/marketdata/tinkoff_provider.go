@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os/signal"
+	"sort"
 	"sync"
 	"syscall"
 	"time"
@@ -23,6 +24,7 @@ type TinkoffMarketDataProvider struct {
 	mu                            sync.RWMutex
 	mdStream                      *investgo.MarketDataStream
 	mdService                     *investgo.MarketDataServiceClient
+	instrumentService             *investgo.InstrumentsServiceClient
 	candleSubscribers             map[MarketData][]chan Candle
 	candlesNotifyCancel           context.CancelFunc
 	isNotifyingCandlesSubscribers bool
@@ -68,6 +70,7 @@ func NewTinkoffMarketdata(token string) (*TinkoffMarketDataProvider, error) {
 		candleSubscribers: make(map[MarketData][]chan Candle),
 		mdStream:          mdStream,
 		mdService:         mdService,
+		instrumentService: instrumentsService,
 	}, nil
 }
 
@@ -125,6 +128,89 @@ func (t *TinkoffMarketDataProvider) UnsubscribeCandles(marketDataInfo MarketData
 	return fmt.Errorf("undefined subscriber")
 }
 
+func (t *TinkoffMarketDataProvider) GetCandlesByTime(
+	marketData MarketData,
+	from time.Time,
+	to time.Time,
+) ([]Candle, error) {
+	result := make([]Candle, 0)
+
+	resp, err := t.mdService.GetCandles(
+		marketData.ID,
+		t.convertToCandleInterval(marketData.Interval),
+		from,
+		to,
+		pb.GetCandlesRequest_CANDLE_SOURCE_EXCHANGE,
+		0,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	for _, candle := range resp.GetCandles() {
+		result = append(result, Candle{
+			MarketData: marketData,
+			StartTime:  candle.GetTime().AsTime(),
+			EndTime:    candle.GetTime().AsTime().Add(time.Duration(ConvertMarketDataIntervalToTime(marketData.Interval))),
+			Open:       candle.GetOpen().ToFloat(),
+			High:       candle.GetHigh().ToFloat(),
+			Low:        candle.GetLow().ToFloat(),
+			Close:      candle.GetClose().ToFloat(),
+			Volume:     float64(candle.GetVolume()),
+		})
+	}
+
+	return result, nil
+}
+
+func (t *TinkoffMarketDataProvider) GetCandlesByCount(
+	marketData MarketData,
+	last time.Time,
+	count int,
+) ([]Candle, error) {
+	result := make([]Candle, 0)
+
+	first := last.Add(-time.Hour * 24 * 14)                                       // 2 weeks ago
+	first = first.Add(-AdjustDurationForWorkingHours(marketData.Interval, count)) // only working hours
+
+	resp, err := t.mdService.GetHistoricCandles(
+		&investgo.GetHistoricCandlesRequest{
+			Instrument: marketData.ID,
+			Interval:   t.convertToCandleInterval(marketData.Interval),
+			From:       first,
+			To:         last,
+			Source:     pb.GetCandlesRequest_CANDLE_SOURCE_EXCHANGE,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	lastIndex := sort.Search(len(resp), func(i int) bool {
+		return resp[i].GetTime().AsTime().UTC().After(last)
+	})
+
+	if lastIndex < count {
+		return nil, fmt.Errorf("error getting history data by count")
+	}
+
+	for _, candle := range resp[lastIndex-count:] {
+		result = append(result, Candle{
+			MarketData: marketData,
+			StartTime:  candle.GetTime().AsTime(),
+			EndTime:    candle.GetTime().AsTime().Add(time.Duration(ConvertMarketDataIntervalToTime(marketData.Interval))),
+			Open:       candle.GetOpen().ToFloat(),
+			High:       candle.GetHigh().ToFloat(),
+			Low:        candle.GetLow().ToFloat(),
+			Close:      candle.GetClose().ToFloat(),
+			Volume:     float64(candle.GetVolume()),
+		})
+	}
+
+	return result, nil
+}
+
 func (t *TinkoffMarketDataProvider) startNotifyingCandlesSubscribers(marketdata MarketData, candlesChan <-chan *pb.Candle) {
 	var ctx context.Context
 	ctx, t.candlesNotifyCancel = signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
@@ -164,42 +250,6 @@ func (t *TinkoffMarketDataProvider) startNotifyingCandlesSubscribers(marketdata 
 			}
 		}
 	}(ctx)
-}
-
-func (t *TinkoffMarketDataProvider) GetCandles(
-	marketData MarketData,
-	from time.Time,
-	to time.Time,
-) ([]Candle, error) {
-	result := make([]Candle, 0)
-
-	resp, err := t.mdService.GetCandles(
-		marketData.ID,
-		t.convertToCandleInterval(marketData.Interval),
-		from,
-		to,
-		pb.GetCandlesRequest_CANDLE_SOURCE_EXCHANGE,
-		0,
-	)
-
-	if err != nil {
-		return nil, err
-	}
-
-	for _, candle := range resp.GetCandles() {
-		result = append(result, Candle{
-			MarketData: marketData,
-			StartTime:  candle.GetTime().AsTime(),
-			EndTime:    candle.GetTime().AsTime().Add(time.Duration(ConvertMarketDataIntervalToTime(marketData.Interval))),
-			Open:       candle.GetOpen().ToFloat(),
-			High:       candle.GetHigh().ToFloat(),
-			Low:        candle.GetLow().ToFloat(),
-			Close:      candle.GetClose().ToFloat(),
-			Volume:     float64(candle.GetVolume()),
-		})
-	}
-
-	return result, nil
 }
 
 func (t *TinkoffMarketDataProvider) convertToSubscriptionInterval(interval MarketDataInterval) pb.SubscriptionInterval {

@@ -53,3 +53,48 @@ func ConvertMarketDataIntervalToTime(interval MarketDataInterval) time.Duration 
 		return 0
 	}
 }
+
+// TODO Тесты!!!
+// Считает длительность в зависимости от интервала и количества, учитывая только рабочие часы
+func AdjustDurationForWorkingHours(interval MarketDataInterval, count int) time.Duration {
+	normalize := func(duration time.Duration) time.Duration {
+		daysCount := int(duration.Hours()) / 8
+
+		if daysCount > 7 {
+			duration += time.Duration((daysCount/7)*2*24) * time.Hour
+		}
+
+		return duration
+	}
+
+	switch interval {
+	case ONE_MINUTE:
+		return normalize(time.Minute * time.Duration(count))
+	case TWO_MIN:
+		return normalize(2 * time.Minute * time.Duration(count))
+	case THREE_MIN:
+		return normalize(3 * time.Minute * time.Duration(count))
+	case FIVE_MINUTES:
+		return normalize(5 * time.Minute * time.Duration(count))
+	case TEN_MIN:
+		return normalize(10 * time.Minute * time.Duration(count))
+	case FIFTEEN_MINUTES:
+		return normalize(15 * time.Minute * time.Duration(count))
+	case THERTY_MIN:
+		return normalize(30 * time.Minute * time.Duration(count))
+	case ONE_HOUR:
+		return normalize(time.Hour * time.Duration(count))
+	case TWO_HOUR:
+		return normalize(2 * time.Hour * time.Duration(count))
+	case FOUR_HOUR:
+		return normalize(4 * time.Hour * time.Duration(count))
+	case ONE_DAY:
+		return normalize(24 * time.Hour * time.Duration(count))
+	case WEEK:
+		return normalize(7 * 24 * time.Hour * time.Duration(count))
+	case MONTH:
+		return normalize(30 * 24 * time.Hour * time.Duration(count))
+	default:
+		return 0
+	}
+}

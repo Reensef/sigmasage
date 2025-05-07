@@ -18,14 +18,15 @@ type Candle struct {
 	Low        float64
 	Close      float64
 	Volume     float64
-	StartTime  time.Time
-	EndTime    time.Time
+	StartTime  time.Time // Open time
+	EndTime    time.Time // Close time
 }
 
 type MarketDataProvider interface {
 	SubscribeCandles(marketDataInfo MarketData) (<-chan Candle, error)
 	UnsubscribeCandles(marketDataInfo MarketData, ch <-chan Candle) error
-	GetCandles(marketDataInfo MarketData, from time.Time, to time.Time) ([]Candle, error)
+	GetCandlesByCount(marketDataInfo MarketData, to time.Time, count int) ([]Candle, error)
+	GetCandlesByTime(marketDataInfo MarketData, from time.Time, to time.Time) ([]Candle, error)
 }
 
 type MarketDataProviderType int32
@@ -37,7 +38,8 @@ const (
 type MarketDataServicer interface {
 	SubscribeCandles(marketData MarketData) (<-chan Candle, error)
 	UnsubscribeCandles(marketData MarketData, ch <-chan Candle) error
-	GetCandles(marketData MarketData, from time.Time, to time.Time) ([]Candle, error)
+	GetCandlesByCount(marketData MarketData, to time.Time, count int) ([]Candle, error)
+	GetCandlesByTime(marketData MarketData, from time.Time, to time.Time) ([]Candle, error)
 }
 
 type MarketDataService struct {
@@ -83,13 +85,29 @@ func (m *MarketDataService) UnsubscribeCandles(marketData MarketData, ch <-chan 
 	}
 }
 
-func (m *MarketDataService) GetCandles(
+func (m *MarketDataService) GetCandlesByTime(
 	marketData MarketData,
 	from time.Time,
 	to time.Time,
 ) ([]Candle, error) {
 	if marketData.ProviderType == TINKOFF {
-		candles, err := m.tinkoffProvider.GetCandles(marketData, from, to)
+		candles, err := m.tinkoffProvider.GetCandlesByTime(marketData, from, to)
+		if err != nil {
+			return nil, err
+		}
+		return candles, nil
+	} else {
+		return nil, fmt.Errorf("undefined provider type")
+	}
+}
+
+func (m *MarketDataService) GetCandlesByCount(
+	marketData MarketData,
+	to time.Time,
+	count int,
+) ([]Candle, error) {
+	if marketData.ProviderType == TINKOFF {
+		candles, err := m.tinkoffProvider.GetCandlesByCount(marketData, to, count)
 		if err != nil {
 			return nil, err
 		}
