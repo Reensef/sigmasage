@@ -8,6 +8,7 @@ import (
 	"github.com/Reensef/sigmasage/internal/telegram/tgserver"
 	"github.com/Reensef/sigmasage/pkg/env"
 	"github.com/Reensef/sigmasage/pkg/marketdata"
+	"github.com/Reensef/sigmasage/pkg/strategy"
 	"github.com/Reensef/sigmasage/pkg/techanalysis"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -39,22 +40,47 @@ func Run() {
 		log.Panic(err)
 	}
 
-	result, err := techAnalysis.GetSMAHistory(techanalysis.SMAInfo{
+	strategyService, err := strategy.NewStrategyService(md, techAnalysis)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	from := time.Now().UTC().Truncate(time.Minute).Add(-time.Hour * 24 * 30)
+	to := time.Now().UTC().Truncate(time.Minute).Add(-time.Hour * 24)
+
+	signals, err := strategyService.SMACBacktest(techanalysis.SMAInfo{
 		MarketData: marketdata.MarketData{
 			ID:           "e6123145-9665-43e0-8413-cd61b8aa9b13",
 			Interval:     marketdata.ONE_MINUTE,
 			ProviderType: marketdata.TINKOFF,
 		},
 		Length: 50,
-	}, time.Now().UTC().Truncate(time.Minute).Add(-time.Hour), time.Now().UTC().Truncate(time.Minute))
+	}, from, to)
 
 	if err != nil {
 		log.Panic(err)
 	}
 
-	for _, sma := range result {
-		log.Printf("SMA: %v", sma)
+	for _, signal := range signals {
+		log.Printf("Signal: %v", signal)
 	}
+
+	// result, err := techAnalysis.SMAHistory(techanalysis.SMAInfo{
+	// 	MarketData: marketdata.MarketData{
+	// 		ID:           "e6123145-9665-43e0-8413-cd61b8aa9b13",
+	// 		Interval:     marketdata.ONE_MINUTE,
+	// 		ProviderType: marketdata.TINKOFF,
+	// 	},
+	// 	Length: 50,
+	// }, time.Now().UTC().Truncate(time.Minute).Add(-time.Hour), time.Now().UTC().Truncate(time.Minute))
+
+	// if err != nil {
+	// 	log.Panic(err)
+	// }
+
+	// for _, sma := range result {
+	// 	log.Printf("SMA: %v", sma)
+	// }
 
 	// strategyService, err := strategy.NewStrategyService(md, techAnalysis)
 

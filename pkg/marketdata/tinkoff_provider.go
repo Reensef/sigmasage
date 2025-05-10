@@ -135,20 +135,21 @@ func (t *TinkoffMarketDataProvider) GetCandlesByTime(
 ) ([]Candle, error) {
 	result := make([]Candle, 0)
 
-	resp, err := t.mdService.GetCandles(
-		marketData.ID,
-		t.convertToCandleInterval(marketData.Interval),
-		from,
-		to,
-		pb.GetCandlesRequest_CANDLE_SOURCE_EXCHANGE,
-		0,
+	resp, err := t.mdService.GetHistoricCandles(
+		&investgo.GetHistoricCandlesRequest{
+			Instrument: marketData.ID,
+			Interval:   t.convertToCandleInterval(marketData.Interval),
+			From:       from,
+			To:         to,
+			Source:     pb.GetCandlesRequest_CANDLE_SOURCE_EXCHANGE,
+		},
 	)
 
 	if err != nil {
 		return nil, err
 	}
 
-	for _, candle := range resp.GetCandles() {
+	for _, candle := range resp {
 		result = append(result, Candle{
 			MarketData: marketData,
 			StartTime:  candle.GetTime().AsTime(),

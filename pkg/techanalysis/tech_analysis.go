@@ -77,7 +77,7 @@ func (t *TechAnalysisService) UnsubscribeSMA(info SMAInfo, ch <-chan SMA) error 
 	return fmt.Errorf("undefined subscriber")
 }
 
-func (t *TechAnalysisService) GetSMAHistory(info SMAInfo, from time.Time, to time.Time) ([]SMA, error) {
+func (t *TechAnalysisService) SMAHistory(info SMAInfo, from time.Time, to time.Time) ([]SMA, error) {
 	if to.Before(from) {
 		return nil, fmt.Errorf("to must be greater than from")
 	}

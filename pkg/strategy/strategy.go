@@ -11,12 +11,19 @@ import (
 )
 
 // Сигнал стратегии пересечения скользящих средних (SimpleMovingAvgCross)
-type SMACSignal int
+type SMACSignalType int
 
 const (
-	SMACSignal_UPWARDS_CROSS SMACSignal = iota
-	SMACSignal_DOWNWARDS_CROSS
+	SMACSignalType_UPWARDS_CROSS SMACSignalType = iota
+	SMACSignalType_DOWNWARDS_CROSS
+	SMACSignalType_NO_CROSS
 )
+
+type SMACSignal struct {
+	Info       techanalysis.SMAInfo
+	SignalType SMACSignalType
+	Time       time.Time
+}
 
 type StrategyService struct {
 	mdService               *marketdata.MarketDataService
@@ -111,20 +118,6 @@ func (s *StrategyService) runSMACStrategy(
 		recvCandle := *firstCandle
 		recvSMA := *firstSMA
 
-		makeDecision := func(candle marketdata.Candle, sma techanalysis.SMA) {
-			if candle.Close > sma.Value {
-				if !isCandleCloseAbove {
-					s.notifySMACSubscribers(config, SMACSignal_UPWARDS_CROSS)
-					isCandleCloseAbove = true
-				}
-			} else if candle.Close < recvSMA.Value {
-				if isCandleCloseAbove {
-					s.notifySMACSubscribers(config, SMACSignal_DOWNWARDS_CROSS)
-					isCandleCloseAbove = false
-				}
-			}
-		}
-
 		for {
 			select {
 			case <-ctx.Done():
@@ -135,7 +128,8 @@ func (s *StrategyService) runSMACStrategy(
 
 				if time.Until(candle.EndTime).Abs() < time.Second {
 					if recvCandle.EndTime == recvSMA.Time {
-						makeDecision(recvCandle, recvSMA)
+						signal := s.makeSMACDecision(recvCandle, recvSMA, &isCandleCloseAbove)
+						s.notifySMACSubscribers(config, signal, recvCandle.EndTime)
 					}
 				}
 			case sma := <-smaChan:
@@ -143,7 +137,8 @@ func (s *StrategyService) runSMACStrategy(
 
 				if time.Until(recvSMA.Time).Abs() < time.Second {
 					if recvCandle.EndTime == recvSMA.Time {
-						makeDecision(recvCandle, recvSMA)
+						signal := s.makeSMACDecision(recvCandle, recvSMA, &isCandleCloseAbove)
+						s.notifySMACSubscribers(config, signal, recvCandle.EndTime)
 					}
 				}
 			}
@@ -180,13 +175,80 @@ func (s *StrategyService) syncSMACData(
 	}
 }
 
-func (s *StrategyService) notifySMACSubscribers(info techanalysis.SMAInfo, signal SMACSignal) {
+func (s *StrategyService) makeSMACDecision(candle marketdata.Candle, sma techanalysis.SMA, isAbove *bool) SMACSignalType {
+	if candle.Close > sma.Value {
+		if !*isAbove {
+			*isAbove = true
+			return SMACSignalType_UPWARDS_CROSS
+		}
+		return SMACSignalType_NO_CROSS
+	} else if candle.Close < sma.Value {
+		if *isAbove {
+			*isAbove = false
+			return SMACSignalType_DOWNWARDS_CROSS
+		}
+		return SMACSignalType_NO_CROSS
+	}
+
+	return SMACSignalType_NO_CROSS
+}
+
+func (s *StrategyService) notifySMACSubscribers(info techanalysis.SMAInfo, signalType SMACSignalType, time time.Time) {
 	subscribers, exists := s.smacStrategySubscribers[info]
 	if !exists {
 		return
 	}
 
+	if signalType == SMACSignalType_NO_CROSS {
+		return
+	}
+
+	signal := SMACSignal{
+		Info:       info,
+		SignalType: signalType,
+		Time:       time,
+	}
+
 	for _, subscriber := range subscribers {
 		subscriber <- signal
 	}
+}
+
+func (s *StrategyService) SMACBacktest(info techanalysis.SMAInfo, from time.Time, to time.Time) ([]SMACSignal, error) {
+	signals := make([]SMACSignal, 0)
+
+	candleHistory, err := s.mdService.GetCandlesByTime(info.MarketData, from, to)
+	if err != nil {
+		return nil, err
+	}
+
+	smaHistory, err := s.techAnalysisService.SMAHistory(info, from, to)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(candleHistory) != len(smaHistory) {
+		return nil, fmt.Errorf("candleHistory and smaHistory have different lengths")
+	}
+
+	firstCandle := candleHistory[0]
+	firstSMA := smaHistory[0]
+
+	isCandleCloseAbove := firstCandle.Close > firstSMA.Value
+
+	for i := 1; i < len(candleHistory); i++ {
+		candle := candleHistory[i]
+		sma := smaHistory[i]
+
+		signal := s.makeSMACDecision(candle, sma, &isCandleCloseAbove)
+		if signal != SMACSignalType_NO_CROSS {
+			signals = append(signals, SMACSignal{
+				Info:       info,
+				SignalType: signal,
+				Time:       candle.EndTime,
+			})
+		}
+	}
+
+	return signals, nil
 }
