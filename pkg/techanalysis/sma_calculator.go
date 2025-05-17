@@ -5,13 +5,13 @@ import (
 	"fmt"
 )
 
+// Rename to Averager???
 type SMACalculator struct {
 	windowSize int        // SMA window size
 	windowSum  float64    // Current sum of values in the window
 	r          *ring.Ring // Queue for storing values
 }
 
-// Create new SMA
 func NewSMACalculator(windowSize int, initialData []float64) (*SMACalculator, error) {
 	if len(initialData) != windowSize {
 		return nil, fmt.Errorf("initial data length (%d) must match window size (%d)", len(initialData), windowSize)

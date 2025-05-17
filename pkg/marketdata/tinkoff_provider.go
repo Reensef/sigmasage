@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Reensef/sigmasage/pkg/domain"
 	"github.com/Reensef/sigmasage/pkg/utils"
 
 	"slices"
@@ -25,12 +26,12 @@ type TinkoffMarketDataProvider struct {
 	mdStream                      *investgo.MarketDataStream
 	mdService                     *investgo.MarketDataServiceClient
 	instrumentService             *investgo.InstrumentsServiceClient
-	candleSubscribers             map[MarketData][]chan Candle
+	candleSubscribers             map[domain.MarketData][]chan domain.Candle
 	candlesNotifyCancel           context.CancelFunc
 	isNotifyingCandlesSubscribers bool
 }
 
-func NewTinkoffMarketdata(token string) (*TinkoffMarketDataProvider, error) {
+func NewTinkoffMarketDataProvider(token string) (*TinkoffMarketDataProvider, error) {
 	logger := utils.TinkoffLogger{}
 
 	config := investgo.Config{
@@ -67,22 +68,18 @@ func NewTinkoffMarketdata(token string) (*TinkoffMarketDataProvider, error) {
 
 	return &TinkoffMarketDataProvider{
 		token:             token,
-		candleSubscribers: make(map[MarketData][]chan Candle),
+		candleSubscribers: make(map[domain.MarketData][]chan domain.Candle),
 		mdStream:          mdStream,
 		mdService:         mdService,
 		instrumentService: instrumentsService,
 	}, nil
 }
 
-// Subscribe returns a channel that will receive candle data for the specified instrument
-func (t *TinkoffMarketDataProvider) SubscribeCandles(marketDataInfo MarketData) (<-chan Candle, error) {
-	// t.mu.Lock()
-	// defer t.mu.Unlock()
-
-	ch := make(chan Candle, 100)
+func (t *TinkoffMarketDataProvider) SubscribeCandles(marketDataInfo domain.MarketData) (<-chan domain.Candle, error) {
+	ch := make(chan domain.Candle, 100)
 
 	if _, exists := t.candleSubscribers[marketDataInfo]; !exists {
-		t.candleSubscribers[marketDataInfo] = make([]chan Candle, 0)
+		t.candleSubscribers[marketDataInfo] = make([]chan domain.Candle, 0)
 	}
 	t.candleSubscribers[marketDataInfo] = append(t.candleSubscribers[marketDataInfo], ch)
 
@@ -105,8 +102,7 @@ func (t *TinkoffMarketDataProvider) SubscribeCandles(marketDataInfo MarketData) 
 	return ch, nil
 }
 
-// Unsubscribe removes a channel from the subscribers list
-func (t *TinkoffMarketDataProvider) UnsubscribeCandles(marketDataInfo MarketData, ch <-chan Candle) error {
+func (t *TinkoffMarketDataProvider) UnsubscribeCandles(marketDataInfo domain.MarketData, ch <-chan domain.Candle) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -129,11 +125,11 @@ func (t *TinkoffMarketDataProvider) UnsubscribeCandles(marketDataInfo MarketData
 }
 
 func (t *TinkoffMarketDataProvider) GetCandlesByTime(
-	marketData MarketData,
+	marketData domain.MarketData,
 	from time.Time,
 	to time.Time,
-) ([]Candle, error) {
-	result := make([]Candle, 0)
+) ([]domain.Candle, error) {
+	result := make([]domain.Candle, 0)
 
 	resp, err := t.mdService.GetHistoricCandles(
 		&investgo.GetHistoricCandlesRequest{
@@ -150,10 +146,10 @@ func (t *TinkoffMarketDataProvider) GetCandlesByTime(
 	}
 
 	for _, candle := range resp {
-		result = append(result, Candle{
+		result = append(result, domain.Candle{
 			MarketData: marketData,
-			StartTime:  candle.GetTime().AsTime(),
-			EndTime:    candle.GetTime().AsTime().Add(time.Duration(ConvertMarketDataIntervalToTime(marketData.Interval))),
+			OpenTime:   candle.GetTime().AsTime(),
+			CloseTime:  candle.GetTime().AsTime().Add(time.Duration(ConvertMarketDataIntervalToTime(marketData.Interval))),
 			Open:       candle.GetOpen().ToFloat(),
 			High:       candle.GetHigh().ToFloat(),
 			Low:        candle.GetLow().ToFloat(),
@@ -166,11 +162,11 @@ func (t *TinkoffMarketDataProvider) GetCandlesByTime(
 }
 
 func (t *TinkoffMarketDataProvider) GetCandlesByCount(
-	marketData MarketData,
+	marketData domain.MarketData,
 	last time.Time,
 	count int,
-) ([]Candle, error) {
-	result := make([]Candle, 0)
+) ([]domain.Candle, error) {
+	result := make([]domain.Candle, 0)
 
 	first := last.Add(-time.Hour * 24 * 14)                                       // 2 weeks ago
 	first = first.Add(-AdjustDurationForWorkingHours(marketData.Interval, count)) // only working hours
@@ -197,10 +193,10 @@ func (t *TinkoffMarketDataProvider) GetCandlesByCount(
 	}
 
 	for _, candle := range resp[lastIndex-count:] {
-		result = append(result, Candle{
+		result = append(result, domain.Candle{
 			MarketData: marketData,
-			StartTime:  candle.GetTime().AsTime(),
-			EndTime:    candle.GetTime().AsTime().Add(time.Duration(ConvertMarketDataIntervalToTime(marketData.Interval))),
+			OpenTime:   candle.GetTime().AsTime(),
+			CloseTime:  candle.GetTime().AsTime().Add(time.Duration(ConvertMarketDataIntervalToTime(marketData.Interval))),
 			Open:       candle.GetOpen().ToFloat(),
 			High:       candle.GetHigh().ToFloat(),
 			Low:        candle.GetLow().ToFloat(),
@@ -212,7 +208,7 @@ func (t *TinkoffMarketDataProvider) GetCandlesByCount(
 	return result, nil
 }
 
-func (t *TinkoffMarketDataProvider) startNotifyingCandlesSubscribers(marketdata MarketData, candlesChan <-chan *pb.Candle) {
+func (t *TinkoffMarketDataProvider) startNotifyingCandlesSubscribers(marketdata domain.MarketData, candlesChan <-chan *pb.Candle) {
 	var ctx context.Context
 	ctx, t.candlesNotifyCancel = signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
 
@@ -233,10 +229,10 @@ func (t *TinkoffMarketDataProvider) startNotifyingCandlesSubscribers(marketdata 
 					return
 				}
 
-				candle := Candle{
+				candle := domain.Candle{
 					MarketData: marketdata,
-					StartTime:  pbCandle.GetTime().AsTime(),
-					EndTime:    pbCandle.GetTime().AsTime().Add(time.Duration(ConvertMarketDataIntervalToTime(marketdata.Interval))),
+					OpenTime:   pbCandle.GetTime().AsTime(),
+					CloseTime:  pbCandle.GetTime().AsTime().Add(time.Duration(ConvertMarketDataIntervalToTime(marketdata.Interval))),
 					Open:       pbCandle.GetOpen().ToFloat(),
 					High:       pbCandle.GetHigh().ToFloat(),
 					Low:        pbCandle.GetLow().ToFloat(),
@@ -253,70 +249,70 @@ func (t *TinkoffMarketDataProvider) startNotifyingCandlesSubscribers(marketdata 
 	}(ctx)
 }
 
-func (t *TinkoffMarketDataProvider) convertToSubscriptionInterval(interval MarketDataInterval) pb.SubscriptionInterval {
+func (t *TinkoffMarketDataProvider) convertToSubscriptionInterval(interval domain.MarketDataInterval) pb.SubscriptionInterval {
 	switch interval {
-	case UNSPECIFIED:
+	case domain.MarketDataInterval_UNSPECIFIED:
 		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_UNSPECIFIED
-	case ONE_MINUTE:
+	case domain.MarketDataInterval_ONE_MINUTE:
 		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_ONE_MINUTE
-	case TWO_MIN:
+	case domain.MarketDataInterval_TWO_MIN:
 		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_2_MIN
-	case THREE_MIN:
+	case domain.MarketDataInterval_THREE_MIN:
 		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_3_MIN
-	case FIVE_MINUTES:
+	case domain.MarketDataInterval_FIVE_MINUTES:
 		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_FIVE_MINUTES
-	case TEN_MIN:
+	case domain.MarketDataInterval_TEN_MIN:
 		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_10_MIN
-	case FIFTEEN_MINUTES:
+	case domain.MarketDataInterval_FIFTEEN_MINUTES:
 		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_FIFTEEN_MINUTES
-	case THERTY_MIN:
+	case domain.MarketDataInterval_THERTY_MIN:
 		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_30_MIN
-	case ONE_HOUR:
+	case domain.MarketDataInterval_ONE_HOUR:
 		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_ONE_HOUR
-	case TWO_HOUR:
+	case domain.MarketDataInterval_TWO_HOUR:
 		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_2_HOUR
-	case FOUR_HOUR:
+	case domain.MarketDataInterval_FOUR_HOUR:
 		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_4_HOUR
-	case ONE_DAY:
+	case domain.MarketDataInterval_ONE_DAY:
 		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_ONE_DAY
-	case WEEK:
+	case domain.MarketDataInterval_WEEK:
 		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_WEEK
-	case MONTH:
+	case domain.MarketDataInterval_MONTH:
 		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_MONTH
 	default:
 		return pb.SubscriptionInterval_SUBSCRIPTION_INTERVAL_UNSPECIFIED
 	}
 }
 
-func (t *TinkoffMarketDataProvider) convertToCandleInterval(interval MarketDataInterval) pb.CandleInterval {
+func (t *TinkoffMarketDataProvider) convertToCandleInterval(interval domain.MarketDataInterval) pb.CandleInterval {
 	switch interval {
-	case UNSPECIFIED:
+	case domain.MarketDataInterval_UNSPECIFIED:
 		return pb.CandleInterval_CANDLE_INTERVAL_UNSPECIFIED
-	case ONE_MINUTE:
+	case domain.MarketDataInterval_ONE_MINUTE:
 		return pb.CandleInterval_CANDLE_INTERVAL_1_MIN
-	case TWO_MIN:
+	case domain.MarketDataInterval_TWO_MIN:
 		return pb.CandleInterval_CANDLE_INTERVAL_2_MIN
-	case THREE_MIN:
+	case domain.MarketDataInterval_THREE_MIN:
 		return pb.CandleInterval_CANDLE_INTERVAL_3_MIN
-	case FIVE_MINUTES:
+	case domain.MarketDataInterval_FIVE_MINUTES:
 		return pb.CandleInterval_CANDLE_INTERVAL_5_MIN
-	case TEN_MIN:
+	case domain.MarketDataInterval_TEN_MIN:
 		return pb.CandleInterval_CANDLE_INTERVAL_10_MIN
-	case FIFTEEN_MINUTES:
+	case domain.MarketDataInterval_FIFTEEN_MINUTES:
 		return pb.CandleInterval_CANDLE_INTERVAL_15_MIN
-	case THERTY_MIN:
+	case domain.MarketDataInterval_THERTY_MIN:
 		return pb.CandleInterval_CANDLE_INTERVAL_30_MIN
-	case ONE_HOUR:
+	case domain.MarketDataInterval_ONE_HOUR:
 		return pb.CandleInterval_CANDLE_INTERVAL_HOUR
-	case TWO_HOUR:
+	case domain.MarketDataInterval_TWO_HOUR:
 		return pb.CandleInterval_CANDLE_INTERVAL_2_HOUR
-	case FOUR_HOUR:
+	case domain.MarketDataInterval_FOUR_HOUR:
 		return pb.CandleInterval_CANDLE_INTERVAL_4_HOUR
-	case ONE_DAY:
+	case domain.MarketDataInterval_ONE_DAY:
 		return pb.CandleInterval_CANDLE_INTERVAL_DAY
-	case WEEK:
+	case domain.MarketDataInterval_WEEK:
 		return pb.CandleInterval_CANDLE_INTERVAL_WEEK
-	case MONTH:
+	case domain.MarketDataInterval_MONTH:
 		return pb.CandleInterval_CANDLE_INTERVAL_MONTH
 	default:
 		return pb.CandleInterval_CANDLE_INTERVAL_UNSPECIFIED

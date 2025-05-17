@@ -10,12 +10,22 @@ func NewTinkoffExchange(tocken string) *TinkoffExchange {
 	return &TinkoffExchange{tocken: tocken}
 }
 
-func (e *TinkoffExchange) Buy(orderInfo OrderInfo) (price float64, err error) {
+func (e *TinkoffExchange) Buy(orderRequest OrderRequest) (orderResult OrderResult, err error) {
 	log.Println("Tinkoff exchange buy")
-	return 0, nil
+	return OrderResult{
+		Count:      orderRequest.Count,
+		LotPrice:   orderRequest.Price,
+		Commission: 0,
+		Time:       orderRequest.Time,
+	}, nil
 }
 
-func (e *TinkoffExchange) Sell(orderInfo OrderInfo) (price float64, err error) {
+func (e *TinkoffExchange) Sell(orderRequest OrderRequest) (orderResult OrderResult, err error) {
 	log.Println("Tinkoff exchange sell")
-	return 0, nil
+	return OrderResult{
+		Count:      orderRequest.Count,
+		LotPrice:   orderRequest.Price,
+		Commission: 0,
+		Time:       orderRequest.Time,
+	}, nil
 }

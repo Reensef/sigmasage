@@ -1,17 +1,17 @@
 package app
 
 import (
+	"io"
 	"log"
+	"os"
 	"time"
 
-	"github.com/Reensef/sigmasage/internal/telegram/tgsender"
-	"github.com/Reensef/sigmasage/internal/telegram/tgserver"
+	"github.com/Reensef/sigmasage/internal/service"
+	"github.com/Reensef/sigmasage/pkg/domain"
 	"github.com/Reensef/sigmasage/pkg/env"
 	"github.com/Reensef/sigmasage/pkg/marketdata"
-	"github.com/Reensef/sigmasage/pkg/strategy"
 	"github.com/Reensef/sigmasage/pkg/techanalysis"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
 )
 
@@ -20,151 +20,97 @@ func Run() {
 		log.Fatal("Error loading .env file")
 	}
 
-	tgbot, err := tgbotapi.NewBotAPI(env.MustString("TELEGRAM_API_TOKEN"))
+	timestamp := time.Now().Format("2006-01-02_15-04-05")
+	logDir := "bin/logs/"
+
+	err := os.MkdirAll(logDir, os.ModePerm)
 	if err != nil {
-		log.Panic(err)
+		log.Fatalf("Failed to create logs directory: %v", err)
 	}
 
-	sender := tgsender.NewSender(tgbot)
-
-	receiver := tgserver.NewServer(tgbot, sender)
-	receiver.Run()
-
-	md, err := marketdata.NewMarketDataService(env.MustString("TINKOFF_MARKET_DATA_API_TOKEN"))
+	file, err := os.OpenFile(
+		logDir+timestamp+".log",
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
+		0666,
+	)
 	if err != nil {
-		log.Panic(err)
+		log.Fatalf("Failed to open log file: %v", err)
 	}
+	defer file.Close()
 
-	techAnalysis, err := techanalysis.NewTechAnalysisService(md)
-	if err != nil {
-		log.Panic(err)
-	}
+	multiWriter := io.MultiWriter(file, os.Stdout)
+	logger := log.New(multiWriter, "APP: ", log.LstdFlags)
 
-	strategyService, err := strategy.NewStrategyService(md, techAnalysis)
-	if err != nil {
-		log.Panic(err)
-	}
-
-	from := time.Now().UTC().Truncate(time.Minute).Add(-time.Hour * 24 * 30)
-	to := time.Now().UTC().Truncate(time.Minute).Add(-time.Hour * 24)
-
-	signals, err := strategyService.SMACBacktest(techanalysis.SMAInfo{
-		MarketData: marketdata.MarketData{
-			ID:           "e6123145-9665-43e0-8413-cd61b8aa9b13",
-			Interval:     marketdata.ONE_MINUTE,
-			ProviderType: marketdata.TINKOFF,
-		},
-		Length: 50,
-	}, from, to)
-
-	if err != nil {
-		log.Panic(err)
-	}
-
-	for _, signal := range signals {
-		log.Printf("Signal: %v", signal)
-	}
-
-	// result, err := techAnalysis.SMAHistory(techanalysis.SMAInfo{
-	// 	MarketData: marketdata.MarketData{
-	// 		ID:           "e6123145-9665-43e0-8413-cd61b8aa9b13",
-	// 		Interval:     marketdata.ONE_MINUTE,
-	// 		ProviderType: marketdata.TINKOFF,
-	// 	},
-	// 	Length: 50,
-	// }, time.Now().UTC().Truncate(time.Minute).Add(-time.Hour), time.Now().UTC().Truncate(time.Minute))
-
+	// tgbot, err := tgbotapi.NewBotAPI(env.MustString("TELEGRAM_API_TOKEN"))
 	// if err != nil {
 	// 	log.Panic(err)
 	// }
 
-	// for _, sma := range result {
-	// 	log.Printf("SMA: %v", sma)
-	// }
+	// sender := tgsender.NewSender(tgbot)
 
-	// strategyService, err := strategy.NewStrategyService(md, techAnalysis)
+	// receiver := tgserver.NewServer(tgbot, sender)
+	// receiver.Run()
 
-	// Need graceful shutdown
-	for {
-
+	tinkoffProvider, err := marketdata.NewTinkoffMarketDataProvider(
+		env.MustString("TINKOFF_MARKET_DATA_API_TOKEN"),
+	)
+	if err != nil {
+		logger.Panic(err)
 	}
 
-	////////////////// Test stream and get candles //////////////////
-	// md, err := marketdata.NewMarketDataService("t.b8rY7Kv7HppxKdwCynTNbZbJ6kCzR09EbEQf5gAsJhGIOVU1oteZAit8eRdInD1pFxC8h8PvnAtumjuvcDn3pg")
-	// if err != nil {
-	// 	log.Fatalf("Error creating marketdata: %v", err)
+	mdService, err := service.NewMarketDataService(tinkoffProvider)
+	if err != nil {
+		logger.Panic(err)
+	}
+
+	smaProvider := techanalysis.NewSMAProvider()
+
+	techAnalysisService := service.NewTechAnalysisService(mdService, smaProvider)
+
+	strategyService := service.NewStrategyService(mdService, techAnalysisService)
+
+	smaHistory, err := techAnalysisService.SMAHistory(
+		domain.SMAInfo{
+			MarketData: domain.MarketData{
+				ID:           "e6123145-9665-43e0-8413-cd61b8aa9b13",
+				Interval:     domain.MarketDataInterval_ONE_HOUR,
+				ProviderType: domain.MarketDataProviderType_TINKOFF,
+			},
+			Length: 50,
+		},
+		time.Now().UTC().Add(-time.Hour*24*28),
+		time.Now().UTC(),
+	)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	for _, sma := range smaHistory {
+		logger.Println(sma.Time, sma.Value)
+	}
+
+	signals, err := strategyService.BacktestSMAC(
+		domain.SMAInfo{
+			MarketData: domain.MarketData{
+				ID:           "e6123145-9665-43e0-8413-cd61b8aa9b13",
+				Interval:     domain.MarketDataInterval_ONE_HOUR,
+				ProviderType: domain.MarketDataProviderType_TINKOFF,
+			},
+			Length: 50,
+		},
+		time.Now().UTC().Add(-time.Hour*24*28),
+		time.Now().UTC(),
+	)
+
+	if err != nil {
+		logger.Panic(err)
+	}
+	for _, signal := range signals {
+		logger.Println(signal.Time, signal.SignalType)
+	}
+
+	// Need graceful shutdown
+	// for {
+
 	// }
-
-	// ch, err := md.SubscribeCandles(marketdata.MarketData{
-	// 	ID:           "e6123145-9665-43e0-8413-cd61b8aa9b13",
-	// 	Interval:     marketdata.ONE_MINUTE,
-	// 	ProviderType: marketdata.TINKOFF,
-	// })
-
-	// if err != nil {
-	// 	log.Fatalf("Error subscribing to candles: %v", err)
-	// }
-
-	// var wg sync.WaitGroup
-	// wg.Add(2)
-
-	// go func() {
-	// 	defer wg.Done()
-	// 	for candle := range ch {
-	// 		log.Printf("Candle: %v", candle)
-	// 	}
-	// }()
-
-	// techAnalysis, err := techanalysis.NewTechAnalysisService(md)
-	// if err != nil {
-	// 	log.Fatalf("Error creating tech analysis: %v", err)
-	// }
-
-	// techCh, err := techAnalysis.SubscribeSMA(techanalysis.SMAInfo{
-	// 	MarketData: marketdata.MarketData{
-	// 		ID:           "e6123145-9665-43e0-8413-cd61b8aa9b13",
-	// 		Interval:     marketdata.ONE_MINUTE,
-	// 		ProviderType: marketdata.TINKOFF,
-	// 	},
-	// 	Length: 10,
-	// })
-
-	// if err != nil {
-	// 	log.Fatalf("Error subscribing to SMA: %v", err)
-	// }
-
-	// go func() {
-	// 	defer wg.Done()
-	// 	for sma := range techCh {
-	// 		log.Printf("SMA: %v", sma)
-	// 	}
-	// }()
-
-	// wg.Wait()
-
-	// if err != nil {
-	// 	log.Fatalf("Error getting candles: %v", err)
-	// }
-
-	// for _, candle := range candles {
-	// 	log.Printf("Candle: %v", candle)
-	// }
-
-	////////////////// Test bot //////////////////
-	// md, err := marketdata.NewTinkoffMarketdata("t.b8rY7Kv7HppxKdwCynTNbZbJ6kCzR09EbEQf5gAsJhGIOVU1oteZAit8eRdInD1pFxC8h8PvnAtumjuvcDn3pg")
-	// if err != nil {
-	// 	log.Fatalf("Error creating marketdata: %v", err)
-	// }
-
-	// bot := tradingbots.NewSMACandlesBot(
-	// 	md,
-	// 	exchange.NewMockExchange(),
-	// 	"b71bd174-c72c-41b0-a66f-5f9073e0d1f5",
-	// 	marketdata.ONE_DAY,
-	// 	50,
-	// 	1000,
-	// )
-
-	// bot.RunHistory(time.Now().Add(-time.Hour*24*30*12), time.Now())
-
 }
