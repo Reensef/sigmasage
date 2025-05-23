@@ -64,7 +64,7 @@ func main() {
 		domain.MarketDataInterval_WEEK,
 	}
 
-	marketdataID := "02cfdf61-6298-4c0f-a9ca-9cabc82afaf3"
+	marketdataID := "e6123145-9665-43e0-8413-cd61b8aa9b13"
 	// e6123145-9665-43e0-8413-cd61b8aa9b13 Сбер
 	// 7de75794-a27f-4d81-a39b-492345813822 Яндекс
 	// 02cfdf61-6298-4c0f-a9ca-9cabc82afaf3 Лукойл
@@ -75,7 +75,7 @@ func main() {
 		for l := 5; l <= 200; l += 5 {
 			startBalance := 10000.0
 
-			deals, balanceHistory, err := tradingBotService.BacktestSMAC(
+			deals, balanceHistory, err := tradingBotService.BacktestGoldenCross(
 				domain.SMAInfo{
 					MarketData: domain.MarketData{
 						ID:           marketdataID,

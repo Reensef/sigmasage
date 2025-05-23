@@ -13,6 +13,7 @@ type StrategyService struct {
 	mdService           *MarketDataService
 	techAnalysisService *TechAnalysisService
 	smacStrategy        *strategy.SMACStrategy
+	goldenCrossStrategy *strategy.GoldenCrossStrategy
 	smaSignalToSMA      map[<-chan domain.SMACSignal]<-chan domain.SMA
 	smaSignalToCandles  map[<-chan domain.SMACSignal]<-chan domain.Candle
 }
@@ -127,6 +128,65 @@ func (s *StrategyService) BacktestSMAC(
 	}
 
 	results, err := s.smacStrategy.Backtest(info, srcSMA, smaHistory)
+	if err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+func (s *StrategyService) BacktestGoldenCross(
+	info domain.GoldenCrossStrategyInfo,
+	from time.Time,
+	to time.Time,
+) ([]domain.GoldenCrossSignal, error) {
+	shortSmaHistory, err := s.techAnalysisService.SMAHistory(
+		domain.SMAInfo{
+			MarketData: info.Md,
+			Length:     info.ShortLength,
+		},
+		from,
+		to,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	longSmaHistory, err := s.techAnalysisService.SMAHistory(
+		domain.SMAInfo{
+			MarketData: info.Md,
+			Length:     info.LongLength,
+		},
+		from,
+		to,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	candleHistory, err := s.mdService.GetCandlesByTime(
+		info.Md,
+		from,
+		to,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	srcSMA := make([]domain.SMASrc, 0, len(candleHistory))
+	for _, candle := range candleHistory {
+		srcSMA = append(srcSMA, domain.SMASrc{
+			Value: candle.Close,
+			Time:  candle.CloseTime,
+		})
+	}
+
+	results, err := s.goldenCrossStrategy.Backtest(
+		info,
+		srcSMA,
+		shortSmaHistory,
+		longSmaHistory,
+	)
 	if err != nil {
 		return nil, err
 	}

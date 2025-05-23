@@ -12,7 +12,10 @@ type SMACalculator struct {
 	r          *ring.Ring // Queue for storing values
 }
 
-func NewSMACalculator(windowSize int, initialData []float64) (*SMACalculator, error) {
+func NewSMACalculator(windowSize int, initialData []float64) (
+	*SMACalculator,
+	error,
+) {
 	if len(initialData) != windowSize {
 		return nil, fmt.Errorf("initial data length (%d) must match window size (%d)", len(initialData), windowSize)
 	}
@@ -23,7 +26,6 @@ func NewSMACalculator(windowSize int, initialData []float64) (*SMACalculator, er
 		r:          ring.New(windowSize),
 	}
 
-	// Initialize the ring with initial data
 	for _, value := range initialData {
 		sma.r.Value = value
 		sma.r = sma.r.Next()
@@ -34,11 +36,9 @@ func NewSMACalculator(windowSize int, initialData []float64) (*SMACalculator, er
 }
 
 func (sma *SMACalculator) Update(value float64) float64 {
-	// Remove oldest value from sum
 	oldestValue := sma.r.Value.(float64)
 	sma.windowSum -= oldestValue
 
-	// Add new value
 	sma.r.Value = value
 	sma.r = sma.r.Next()
 	sma.windowSum += value

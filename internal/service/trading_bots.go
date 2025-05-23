@@ -112,18 +112,34 @@ func (t *TradingBotService) BacktestSMAC(
 	return bot.Deals(), bot.BalanceHistory(), nil
 }
 
-func (t *TradingBotService) SMACBotDeals(id int64) ([]domain.SMACSignalDial, error) {
-	bot, ok := t.smacBots[id]
-	if !ok {
-		return nil, fmt.Errorf("bot not found")
+func (t *TradingBotService) BacktestGoldenCross(
+	strategyInfo domain.GoldenCrossStrategyInfo,
+	startBalance float64,
+	commissionPercent float64,
+	slippagePercent float64,
+	from time.Time,
+	to time.Time,
+) (resultSignalDeals []domain.GoldenCrossSignalDial, balanceHistory []float64, err error) {
+	signals, err := t.strategyService.BacktestGoldenCross(strategyInfo, from, to)
+	if err != nil {
+		return nil, nil, err
 	}
-	return bot.Deals(), nil
-}
 
-func (t *TradingBotService) SMACBotBalance(id int64) (float64, error) {
-	bot, ok := t.smacBots[id]
-	if !ok {
-		return 0, fmt.Errorf("bot not found")
+	exchanger := exchange.NewMockExchange(
+		commissionPercent,
+		slippagePercent,
+	)
+
+	signalChan := make(chan domain.GoldenCrossSignal)
+	bot := tradingbots.NewGoldenCrossBot(exchanger, startBalance, signalChan)
+
+	go bot.Run()
+
+	for _, signal := range signals {
+		signalChan <- signal
 	}
-	return bot.Balance(), nil
+	bot.Stop()
+	close(signalChan)
+
+	return bot.Deals(), bot.BalanceHistory(), nil
 }

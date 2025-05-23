@@ -126,6 +126,7 @@ func (s *SMACStrategy) run(
 }
 
 // TODO пересмотреть синхронизацию данных
+// В синнхронизации нет необходимости, если время не совпадет это признак ошибки
 func (s *SMACStrategy) syncSMACData(
 	candlesChan <-chan domain.SMASrc,
 	smaChan <-chan domain.SMA,
