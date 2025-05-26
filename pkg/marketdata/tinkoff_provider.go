@@ -161,7 +161,7 @@ func (t *TinkoffMarketDataProvider) GetCandlesByTime(
 			),
 			From:   from,
 			To:     to,
-			Source: pb.GetCandlesRequest_CANDLE_SOURCE_EXCHANGE,
+			Source: pb.GetCandlesRequest_CANDLE_SOURCE_INCLUDE_WEEKEND,
 		},
 	)
 
@@ -213,7 +213,7 @@ func (t *TinkoffMarketDataProvider) GetCandlesByCount(
 			),
 			From:   first,
 			To:     last,
-			Source: pb.GetCandlesRequest_CANDLE_SOURCE_EXCHANGE,
+			Source: pb.GetCandlesRequest_CANDLE_SOURCE_INCLUDE_WEEKEND,
 		},
 	)
 	if err != nil {

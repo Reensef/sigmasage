@@ -54,7 +54,7 @@ func main() {
 
 	techAnalysisService := service.NewTechAnalysisService(mdService, smaProvider)
 	strategyService := service.NewStrategyService(mdService, techAnalysisService)
-	tradingBotService := service.NewTradingBotService(strategyService)
+	tradingBotService := service.NewTradingBotService(strategyService, mdService)
 
 	intervals := []domain.MarketDataInterval{
 		// domain.MarketDataInterval_ONE_MINUTE,

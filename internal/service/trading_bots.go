@@ -2,6 +2,8 @@ package service
 
 import (
 	"fmt"
+	"log"
+	"math"
 	"time"
 
 	"github.com/Reensef/sigmasage/pkg/domain"
@@ -10,14 +12,15 @@ import (
 )
 
 type TradingBotService struct {
+	mdService       *MarketDataService
 	strategyService *StrategyService
 	smacBots        map[int64]*tradingbots.SMACBot // TODO Наследование?
 	smacBotInfo     map[int64]domain.SMAInfo
 	smacSignals     map[domain.SMAInfo]<-chan domain.SMACSignal
 }
 
-func NewTradingBotService(strategyService *StrategyService) *TradingBotService {
-	return &TradingBotService{strategyService: strategyService}
+func NewTradingBotService(strategyService *StrategyService, mdService *MarketDataService) *TradingBotService {
+	return &TradingBotService{strategyService: strategyService, mdService: mdService}
 }
 
 func (t *TradingBotService) CreateSMACBot(
@@ -142,4 +145,71 @@ func (t *TradingBotService) BacktestGoldenCross(
 	close(signalChan)
 
 	return bot.Deals(), bot.BalanceHistory(), nil
+}
+
+// DCA - Dollar Cost Averaging
+func (t *TradingBotService) BacktestDCA(
+	md domain.MarketData,
+	addition int,
+	commissionPercent float64,
+	slippagePercent float64,
+	from time.Time,
+	to time.Time,
+) (deals []domain.Deal, baseInvestments float64, resultBalance float64, err error) {
+	candles, err := t.mdService.GetCandlesByTime(md, from, to)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+
+	if len(candles) < 2 {
+		return nil, 0, 0, fmt.Errorf("not enough data")
+	}
+
+	currBalance := 0.0
+	currCount := 0
+
+	for _, candle := range candles {
+		log.Println(candle.Open, candle.OpenTime)
+		baseInvestments += float64(addition)
+		currBalance += float64(addition)
+		count := int(currBalance / candle.Open)
+		currCount += count
+		currBalance = math.Mod(currBalance, candle.Open)
+
+		basePrice := float64(count) * candle.Open
+		basePrice *= 1 + slippagePercent
+
+		commision := basePrice * commissionPercent
+
+		deal := domain.Deal{
+			Direction:  domain.DealDirection_BUY,
+			Time:       candle.OpenTime,
+			Price:      candle.Open,
+			Count:      count,
+			LotPrice:   basePrice + commision,
+			Commission: commision,
+		}
+		deals = append(deals, deal)
+	}
+
+	lastCandle := candles[len(candles)-1]
+
+	basePrice := float64(currCount) * lastCandle.Close
+	basePrice *= 1 - slippagePercent
+
+	commision := basePrice * commissionPercent
+
+	deal := domain.Deal{
+		Direction:  domain.DealDirection_SELL,
+		Time:       lastCandle.CloseTime,
+		Price:      lastCandle.Close,
+		Count:      currCount,
+		LotPrice:   basePrice + commision,
+		Commission: commision,
+	}
+	deals = append(deals, deal)
+
+	currBalance += basePrice - commision
+
+	return deals, baseInvestments, currBalance, nil
 }

@@ -63,42 +63,61 @@ func Run() {
 		logger.Panic(err)
 	}
 
+	// candles, err := mdService.GetCandlesByTime(domain.MarketData{
+	// 	ID:           "e6123145-9665-43e0-8413-cd61b8aa9b13",
+	// 	Interval:     domain.MarketDataInterval_ONE_HOUR,
+	// 	ProviderType: domain.MarketDataProviderType_TINKOFF,
+	// },
+	// 	time.Now().UTC().Add(-time.Hour*24*3),
+	// 	time.Now().UTC(),
+	// )
+	// if err != nil {
+	// 	logger.Panic(err)
+	// }
+
+	// for _, candle := range candles {
+	// 	logger.Println(candle.CloseTime, candle.Close)
+	// }
+
+	// logger.Println("--------------------------------")
+
 	smaProvider := techanalysis.NewSMAProvider()
 
 	techAnalysisService := service.NewTechAnalysisService(mdService, smaProvider)
 
 	strategyService := service.NewStrategyService(mdService, techAnalysisService)
 
-	smaHistory, err := techAnalysisService.SMAHistory(
-		domain.SMAInfo{
-			MarketData: domain.MarketData{
+	// smaHistory, err := techAnalysisService.SMAHistory(
+	// 	domain.SMAInfo{
+	// 		MarketData: domain.MarketData{
+	// 			ID:           "e6123145-9665-43e0-8413-cd61b8aa9b13",
+	// 			Interval:     domain.MarketDataInterval_ONE_HOUR,
+	// 			ProviderType: domain.MarketDataProviderType_TINKOFF,
+	// 		},
+	// 		Length: 10,
+	// 	},
+	// 	time.Now().UTC().Add(-time.Hour*24*3),
+	// 	time.Now().UTC(),
+	// )
+	// if err != nil {
+	// 	log.Panic(err)
+	// }
+
+	// for _, sma := range smaHistory {
+	// 	logger.Println(sma.Time, sma.Value)
+	// }
+
+	signals, err := strategyService.BacktestGoldenCross(
+		domain.GoldenCrossStrategyInfo{
+			Md: domain.MarketData{
 				ID:           "e6123145-9665-43e0-8413-cd61b8aa9b13",
 				Interval:     domain.MarketDataInterval_ONE_HOUR,
 				ProviderType: domain.MarketDataProviderType_TINKOFF,
 			},
-			Length: 50,
+			ShortLength: 50,
+			LongLength:  100,
 		},
-		time.Now().UTC().Add(-time.Hour*24*28),
-		time.Now().UTC(),
-	)
-	if err != nil {
-		log.Panic(err)
-	}
-
-	for _, sma := range smaHistory {
-		logger.Println(sma.Time, sma.Value)
-	}
-
-	signals, err := strategyService.BacktestSMAC(
-		domain.SMAInfo{
-			MarketData: domain.MarketData{
-				ID:           "e6123145-9665-43e0-8413-cd61b8aa9b13",
-				Interval:     domain.MarketDataInterval_ONE_HOUR,
-				ProviderType: domain.MarketDataProviderType_TINKOFF,
-			},
-			Length: 50,
-		},
-		time.Now().UTC().Add(-time.Hour*24*28),
+		time.Now().UTC().Add(-time.Hour*24*28*6),
 		time.Now().UTC(),
 	)
 

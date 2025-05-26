@@ -58,59 +58,38 @@ func main() {
 	intervals := []domain.MarketDataInterval{
 		// domain.MarketDataInterval_ONE_MINUTE,
 		// domain.MarketDataInterval_THERTY_MIN,
-		domain.MarketDataInterval_ONE_HOUR,
-		domain.MarketDataInterval_ONE_DAY,
-		domain.MarketDataInterval_WEEK,
+		// domain.MarketDataInterval_ONE_HOUR,
+		// domain.MarketDataInterval_ONE_DAY,
+		// domain.MarketDataInterval_WEEK,
+		domain.MarketDataInterval_MONTH,
 	}
 
-	marketdataID := "02cfdf61-6298-4c0f-a9ca-9cabc82afaf3"
+	marketdataID := "e6123145-9665-43e0-8413-cd61b8aa9b13"
 	// e6123145-9665-43e0-8413-cd61b8aa9b13 Сбер
 	// 7de75794-a27f-4d81-a39b-492345813822 Яндекс
 	// 02cfdf61-6298-4c0f-a9ca-9cabc82afaf3 Лукойл
 
-	test := func(interval domain.MarketDataInterval, l1, l2 int) {
-		startBalance := 10000.0
+	for _, interval := range intervals {
+		logger.Printf("Interval: %s", marketdata.ConvertMarketDataIntervalToTime(interval))
+		addition := 10000
 
-		deals, balanceHistory, err := tradingBotService.BacktestGoldenCross(
-			domain.GoldenCrossStrategyInfo{
-				Md: domain.MarketData{
-					ID:           marketdataID,
-					Interval:     interval,
-					ProviderType: domain.MarketDataProviderType_TINKOFF,
-				},
-				ShortLength: l1,
-				LongLength:  l2,
+		deals, baseInvestments, resultBalance, err := tradingBotService.BacktestDCA(
+			domain.MarketData{
+				ID:           marketdataID,
+				Interval:     interval,
+				ProviderType: domain.MarketDataProviderType_TINKOFF,
 			},
-			startBalance,
+			addition,
 			0.0005,
 			0.0005,
-			time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC),
+			time.Date(2019, time.November, 1, 0, 0, 0, 0, time.UTC),
 			time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC),
 		)
 		if err != nil {
 			log.Panic(err)
 		}
 
-		if len(deals) < 2 {
-			logger.Printf("Too short history for L1: %d L2: %d", l1, l2)
-			return
-		}
-
-		balance := balanceHistory[len(balanceHistory)-1]
-		if deals[len(deals)-1].Deal.Direction == domain.DealDirection_BUY {
-			balance = balanceHistory[len(balanceHistory)-2]
-		}
-
-		logger.Printf("L1: %-5d L2: %-5d DEALS: %-5d BALANCE: %-10.2f PROFIT: %.2f%%",
-			l1, l2, len(deals), balance, (balance-startBalance)/startBalance*100)
-	}
-
-	for _, interval := range intervals {
-		logger.Printf("Interval: %s", marketdata.ConvertMarketDataIntervalToTime(interval))
-
-		for l1 := 20; l1 <= 100; l1 += 10 {
-			test(interval, l1, int(float64(l1)*1.5))
-			test(interval, l1, int(float64(l1)*2))
-		}
+		logger.Printf("DEALS: %-5d BALANCE: %-10.2f PROFIT: %.2f%%",
+			len(deals), resultBalance, (resultBalance-baseInvestments)/baseInvestments*100/5)
 	}
 }
