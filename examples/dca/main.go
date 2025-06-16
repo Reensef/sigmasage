@@ -64,7 +64,7 @@ func main() {
 		domain.MarketDataInterval_MONTH,
 	}
 
-	marketdataID := "e6123145-9665-43e0-8413-cd61b8aa9b13"
+	marketdataID := "02cfdf61-6298-4c0f-a9ca-9cabc82afaf3"
 	// e6123145-9665-43e0-8413-cd61b8aa9b13 Сбер
 	// 7de75794-a27f-4d81-a39b-492345813822 Яндекс
 	// 02cfdf61-6298-4c0f-a9ca-9cabc82afaf3 Лукойл
@@ -82,7 +82,7 @@ func main() {
 			addition,
 			0.0005,
 			0.0005,
-			time.Date(2019, time.November, 1, 0, 0, 0, 0, time.UTC),
+			time.Date(2014, time.November, 1, 0, 0, 0, 0, time.UTC),
 			time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC),
 		)
 		if err != nil {
@@ -90,6 +90,6 @@ func main() {
 		}
 
 		logger.Printf("DEALS: %-5d BALANCE: %-10.2f PROFIT: %.2f%%",
-			len(deals), resultBalance, (resultBalance-baseInvestments)/baseInvestments*100/5)
+			len(deals), resultBalance, (resultBalance-baseInvestments)/baseInvestments*100/10)
 	}
 }
